@@ -28,13 +28,16 @@
 #include <getopt.h>
 #include <errno.h>
 #include <signal.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/fanotify.h>
+#include <sys/time.h>
 
 /* command line options */
 char* option_output = NULL;
 long option_timeout = -1;
 int option_current_mount = 0;
+int option_timestamp = 0;
 
 /* --time alarm sets this to 0 */
 volatile int running = 1;
@@ -115,29 +118,46 @@ void
 print_event(struct fanotify_event_metadata *data)
 {
     int fd, len;
-    static char buffer[4096];
+    static char procname[100];
+    static char timestamp[100];
     struct stat st;
     const char* path;
+    struct timeval event_time;
+
+    /* get event time, if requested */
+    if (option_timestamp) {
+        if (gettimeofday (&event_time, NULL) < 0) {
+            perror ("gettimeofday");
+            exit (1);
+        }
+    }
 
     /* read process name */
-    snprintf (buffer, sizeof (buffer), "/proc/%i/comm", data->pid);
-    fd = open (buffer, O_RDONLY);
+    snprintf (procname, sizeof (procname), "/proc/%i/comm", data->pid);
+    fd = open (procname, O_RDONLY);
     if (fd > 0) {
-        len = read (fd, buffer, 100);
-        while (len > 0 && buffer[len-1] == '\n') {
-            buffer[len-1] = '\0';
+        len = read (fd, procname, 100);
+        while (len > 0 && procname[len-1] == '\n') {
+            procname[len-1] = '\0';
             len--;
         }
     } else
-        strcpy (buffer, "unknown");
+        strcpy (procname, "unknown");
     close (fd);
 
+    /* try to figure out the path name */
     if (fstat (data->fd, &st) < 0) {
         perror ("stat");
         exit (1);
     }
     path = stat2path (data->pid, &st);
-    printf ("%s(%i): %s ", buffer, data->pid, mask2str (data->mask));
+
+    /* print event */
+    if (option_timestamp) {
+        strftime (timestamp, sizeof (timestamp), "%H:%M:%S", localtime (&event_time.tv_sec));
+        printf ("%s.%6li ", timestamp, event_time.tv_usec);
+    }
+    printf ("%s(%i): %s ", procname, data->pid, mask2str (data->mask));
     if (path != NULL)
         puts (path);
     else
@@ -214,6 +234,7 @@ help ()
 "  -c, --current-mount\t\tOnly record events on partition/mount of current directory.\n"
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -t SECONDS, --time=SECONDS\tStop after the given number of seconds.\n"
+"  -s, --timestamp\t\tAdd timestamp to events.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -232,12 +253,13 @@ parse_args (int argc, char** argv)
         {"current-mount", no_argument,       0, 'c'},
         {"output",        required_argument, 0, 'o'},
         {"time",          required_argument, 0, 't'},
+        {"timestamp",     no_argument,       0, 's'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "ho:t:c", long_options, NULL);
+        c = getopt_long (argc, argv, "ho:t:cs", long_options, NULL);
 
         if (c == -1)
             break;
@@ -257,6 +279,10 @@ parse_args (int argc, char** argv)
 
             case 'c':
                 option_current_mount = 1;
+                break;
+
+            case 's':
+                option_timestamp = 1;
                 break;
 
             case 'h':
