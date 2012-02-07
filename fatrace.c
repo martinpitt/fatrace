@@ -38,6 +38,8 @@ char* option_output = NULL;
 long option_timeout = -1;
 int option_current_mount = 0;
 int option_timestamp = 0;
+pid_t ignored_pids[1024];
+unsigned ignored_pids_len = 0;
 
 /* --time alarm sets this to 0 */
 volatile int running = 1;
@@ -235,6 +237,7 @@ help ()
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events.\n"
+"  -i PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -247,6 +250,7 @@ void
 parse_args (int argc, char** argv)
 {
     int c;
+    long pid;
     char *endptr;
 
     static struct option long_options[] = {
@@ -254,12 +258,13 @@ parse_args (int argc, char** argv)
         {"output",        required_argument, 0, 'o'},
         {"seconds",       required_argument, 0, 's'},
         {"timestamp",     no_argument,       0, 't'},
+        {"ignore-pid",    required_argument, 0, 'p'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "co:s:th", long_options, NULL);
+        c = getopt_long (argc, argv, "co:s:tp:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -277,6 +282,20 @@ parse_args (int argc, char** argv)
                 option_timeout = strtol (optarg, &endptr, 10);
                 if (*endptr != '\0' || option_timeout <= 0) {
                     fputs ("Error: Invalid number of seconds\n", stderr);
+                    exit (1);
+                }
+                break;
+
+            case 'p':
+                pid = strtol (optarg, &endptr, 10);
+                if (*endptr != '\0' || pid <= 0) {
+                    fputs ("Error: Invalid PID\n", stderr);
+                    exit (1);
+                }
+                if (ignored_pids_len < sizeof (ignored_pids))
+                    ignored_pids[ignored_pids_len++] = pid;
+                else {
+                    fputs ("Error: Too many ignored PIDs\n", stderr);
                     exit (1);
                 }
                 break;
@@ -300,6 +319,24 @@ parse_args (int argc, char** argv)
     }
 }
 
+/**
+ * show_pid:
+ *
+ * Check if events for given PID should be logged.
+ *
+ * Returns: 1 if PID is to be logged, 0 if not.
+ */
+int
+show_pid (pid_t pid)
+{
+    int i;
+    for (i = 0; i < ignored_pids_len; ++i)
+        if (pid == ignored_pids[i])
+            return 0;
+
+    return 1;
+}
+
 void
 alarm_handler (int signal)
 {
@@ -314,11 +351,11 @@ main (int argc, char** argv)
     int res;
     static char buffer[4096];
     struct fanotify_event_metadata *data;
-    pid_t my_pid;
+
+    /* always ignore events from ourselves (writing log file) */
+    ignored_pids[ignored_pids_len++] = getpid();
 
     parse_args (argc, argv);
-
-    my_pid = getpid();
 
     fan_fd = fanotify_init (0, 0);
     if (fan_fd < 0) {
@@ -360,7 +397,7 @@ main (int argc, char** argv)
         }
         data = (struct fanotify_event_metadata *) &buffer;
         while (FAN_EVENT_OK (data, res)) {
-            if (data->pid != my_pid)
+            if (show_pid (data->pid))
                 print_event (data);
             close (data->fd);
             data = FAN_EVENT_NEXT (data, res);
