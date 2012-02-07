@@ -25,8 +25,12 @@
 #include <limits.h>
 #include <dirent.h>
 #include <mntent.h>
+#include <getopt.h>
 #include <sys/stat.h>
 #include <sys/fanotify.h>
+
+/* command line options */
+char* option_output = NULL;
 
 /**
  * mask2str:
@@ -177,14 +181,73 @@ setup_fanotify(int fan_fd)
     endmntent (mounts);
 }
 
+/**
+ * help:
+ *
+ * Show help.
+ */
+void
+help ()
+{
+    puts ("Usage: fatrace [options...] \n"
+"\n"
+"Options:\n"
+"  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
+"  -h, --help\t\t\tShow help.");
+}
+
+/**
+ * parse_args:
+ *
+ * Parse command line arguments and set the global option_* variables.
+ */
+void
+parse_args (int argc, char** argv)
+{
+    int c;
+
+    static struct option long_options[] = {
+        {"output", required_argument, 0, 'o'},
+        {"help",   no_argument,       0, 'h'},
+        {0,        0,                 0,  0 }
+    };
+
+    while (1) {
+        c = getopt_long (argc, argv, "ho:", long_options, NULL);
+
+        if (c == -1)
+            break;
+
+        switch (c) {
+            case 'o':
+                option_output = strdup (optarg);
+                break;
+
+            case 'h':
+                help ();
+                exit (0);
+
+            case '?':
+                exit (1);
+
+            default:
+                fprintf (stderr, "Internal error: unexpected option '%c'\n", c);
+                exit (1);
+        }
+    }
+
+}
+
 int
-main()
+main (int argc, char** argv)
 {
     int fan_fd;
     int res;
     static char buffer[4096];
     struct fanotify_event_metadata *data;
     pid_t my_pid;
+
+    parse_args (argc, argv);
 
     my_pid = getpid();
 
@@ -195,6 +258,16 @@ main()
     }
 
     setup_fanotify (fan_fd);
+
+    /* output file? */
+    if (option_output) {
+        int fd = open (option_output, O_CREAT|O_WRONLY, 0666);
+        if (fd < 0) {
+            perror ("Failed to open output file");
+            exit (1);
+        }
+        dup2 (fd, STDOUT_FILENO);
+    }
 
     while (1) {
         res = read (fan_fd, &buffer, 4096);

@@ -7,6 +7,9 @@ fatrace \- report system wide file access events
 .SH SYNOPSIS
 
 .B fatrace
+[
+.I OPTIONS
+]
 
 .SH DESCRIPTION
 
@@ -23,6 +26,16 @@ unnecessarily and thus prevent some power saving.
 By default, events are reported to stdout. This will cause some loops if you
 run this tool in e. g. gnome-terminal, as this causes a disk access for every
 output line. To avoid this, redirect the output into a file.
+
+.SH OPTIONS
+
+.TP
+.B \-o \fIFILE\fR, \fB\-\-output=\fIFILE
+Write events to given file instead of standard output.
+
+.TP
+.B \-h \fR, \fB\-\-help
+Print help and exit.
 
 .SH AUTHOR
 .B fatrace
