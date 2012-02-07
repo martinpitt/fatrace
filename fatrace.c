@@ -26,11 +26,17 @@
 #include <dirent.h>
 #include <mntent.h>
 #include <getopt.h>
+#include <errno.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/fanotify.h>
 
 /* command line options */
 char* option_output = NULL;
+long option_timeout = -1;
+
+/* --time alarm sets this to 0 */
+volatile int running = 1;
 
 /**
  * mask2str:
@@ -193,6 +199,7 @@ help ()
 "\n"
 "Options:\n"
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
+"  -t SECONDS, --time=SECONDS\tStop after the given number of seconds.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -205,15 +212,17 @@ void
 parse_args (int argc, char** argv)
 {
     int c;
+    char *endptr;
 
     static struct option long_options[] = {
         {"output", required_argument, 0, 'o'},
+        {"time",   required_argument, 0, 't'},
         {"help",   no_argument,       0, 'h'},
         {0,        0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "ho:", long_options, NULL);
+        c = getopt_long (argc, argv, "ho:t:", long_options, NULL);
 
         if (c == -1)
             break;
@@ -221,6 +230,14 @@ parse_args (int argc, char** argv)
         switch (c) {
             case 'o':
                 option_output = strdup (optarg);
+                break;
+
+            case 't':
+                option_timeout = strtol (optarg, &endptr, 10);
+                if (*endptr != '\0' || option_timeout <= 0) {
+                    fputs ("Error: Invalid number of seconds\n", stderr);
+                    exit (1);
+                }
                 break;
 
             case 'h':
@@ -235,7 +252,13 @@ parse_args (int argc, char** argv)
                 exit (1);
         }
     }
+}
 
+void
+alarm_handler (int signal)
+{
+    if (signal == SIGALRM)
+        running = 0;
 }
 
 int
@@ -269,9 +292,23 @@ main (int argc, char** argv)
         dup2 (fd, STDOUT_FILENO);
     }
 
-    while (1) {
+    /* set up --time alarm */
+    if (option_timeout > 0) {
+        struct sigaction sa;
+        sa.sa_handler = alarm_handler; 
+        sigemptyset (&sa.sa_mask);
+        sa.sa_flags = 0;
+        if (sigaction (SIGALRM, &sa, NULL) < 0) {
+            perror ("sigaction");
+            exit (1);
+        }
+        alarm (option_timeout);
+    }
+
+    /* read all events in a loop */
+    while (running) {
         res = read (fan_fd, &buffer, 4096);
-        if (res < 0) {
+        if (res < 0 && errno != EINTR) {
             perror ("read");
             exit(1);
         }
@@ -283,5 +320,7 @@ main (int argc, char** argv)
             data = FAN_EVENT_NEXT (data, res);
         }
     }
+
+    return 0;
 } 
 
