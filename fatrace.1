@@ -27,6 +27,40 @@ By default, events are reported to stdout. This will cause some loops if you
 run this tool in e. g. gnome-terminal, as this causes a disk access for every
 output line. To avoid this, redirect the output into a file.
 
+.SH OUTPUT FORMAT
+
+A typical event looks like
+
+.RS 4
+rsyslogd(875): W /var/log/auth.log
+.br
+compiz(1971): O device 8:2 inode 658203
+.RE
+
+The line has the following fields:
+
+.IP \(bu 2
+Process name. This is read from /proc/pid/comm, and might be abbreviated for
+long process names.
+
+.IP \(bu 2
+Process ID
+
+.IP \(bu 2
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, or \fBC\fRlose.
+
+.IP \(bu 2
+Affected file. In some cases the path and name cannot be determined, e. g.
+because it is a temporary file which is already deleted. In that case, it
+prints the devices' major and minor number and the inode number. To examine
+such a process in more detail, you should consider using
+.BR strace (1).
+
+.RE
+If you specify the
+.B \-\-timestamp
+option, the first field will be the current time (including microseconds).
+
 .SH OPTIONS
 
 .TP
