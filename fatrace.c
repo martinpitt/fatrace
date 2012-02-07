@@ -233,8 +233,8 @@ help ()
 "Options:\n"
 "  -c, --current-mount\t\tOnly record events on partition/mount of current directory.\n"
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
-"  -t SECONDS, --time=SECONDS\tStop after the given number of seconds.\n"
-"  -s, --timestamp\t\tAdd timestamp to events.\n"
+"  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
+"  -t, --timestamp\t\tAdd timestamp to events.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -252,24 +252,28 @@ parse_args (int argc, char** argv)
     static struct option long_options[] = {
         {"current-mount", no_argument,       0, 'c'},
         {"output",        required_argument, 0, 'o'},
-        {"time",          required_argument, 0, 't'},
-        {"timestamp",     no_argument,       0, 's'},
+        {"seconds",       required_argument, 0, 's'},
+        {"timestamp",     no_argument,       0, 't'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "ho:t:cs", long_options, NULL);
+        c = getopt_long (argc, argv, "co:s:th", long_options, NULL);
 
         if (c == -1)
             break;
 
         switch (c) {
+            case 'c':
+                option_current_mount = 1;
+                break;
+
             case 'o':
                 option_output = strdup (optarg);
                 break;
 
-            case 't':
+            case 's':
                 option_timeout = strtol (optarg, &endptr, 10);
                 if (*endptr != '\0' || option_timeout <= 0) {
                     fputs ("Error: Invalid number of seconds\n", stderr);
@@ -277,11 +281,7 @@ parse_args (int argc, char** argv)
                 }
                 break;
 
-            case 'c':
-                option_current_mount = 1;
-                break;
-
-            case 's':
+            case 't':
                 option_timestamp = 1;
                 break;
 
@@ -290,6 +290,7 @@ parse_args (int argc, char** argv)
                 exit (0);
 
             case '?':
+                /* getopt_long() already prints error message */
                 exit (1);
 
             default:
