@@ -13,6 +13,8 @@ distclean: clean
 
 install: fatrace
 	install -m 755 -D fatrace $(DESTDIR)$(PREFIX)/bin/fatrace
+	install -d $(DESTDIR)$(PREFIX)/share/man/man1/
+	install -m 644 *.1 $(DESTDIR)$(PREFIX)/share/man/man1/
 
 dist: distclean
 	files=`ls *`; \
