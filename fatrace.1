@@ -1,0 +1,30 @@
+.TH fatrace 1 "February 07, 2012" "Martin Pitt"
+
+.SH NAME
+
+fatrace \- report system wide file access events
+
+.SH SYNOPSIS
+
+.B fatrace
+
+.SH DESCRIPTION
+
+.B fatrace
+reports file access events from all running processes. 
+
+It does not report file access by fatrace itself, to avoid logging events
+caused by writing the output into a file. It also ignores events on virtual and
+kernel file systems such as sysfs, proc, and devtmpfs.
+
+Its main purpose is to find processes which keep waking up the disk
+unnecessarily and thus prevent some power saving.
+
+By default, events are reported to stdout. This will cause some loops if you
+run this tool in e. g. gnome-terminal, as this causes a disk access for every
+output line. To avoid this, redirect the output into a file.
+
+.SH AUTHOR
+.B fatrace
+is developed by Martin Pitt <martin.pitt@ubuntu.com>.
+
