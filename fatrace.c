@@ -359,7 +359,9 @@ main (int argc, char** argv)
 
     fan_fd = fanotify_init (0, 0);
     if (fan_fd < 0) {
-        perror ("fanotify_init");
+        fprintf (stderr, "Cannot initialize fanotify: %s\n", strerror (errno));
+        if (errno == EPERM)
+            fputs ("You need to run this program as root.\n", stderr);
         exit(1);
     }
 
