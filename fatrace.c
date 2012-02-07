@@ -24,6 +24,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <dirent.h>
+#include <mntent.h>
 #include <sys/stat.h>
 #include <sys/fanotify.h>
 
@@ -132,6 +133,50 @@ print_event(struct fanotify_event_metadata *data)
         printf ("device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
 }
 
+/**
+ * fanotify_mark_mounts:
+ *
+ * @fan_fd: fanotify file descriptor as returned by fanotify_init().
+ *
+ * Set up fanotify watches on all mount points.
+ */
+void
+setup_fanotify(int fan_fd)
+{
+    int res;
+    FILE* mounts;
+    struct mntent* mount;
+    
+    /* blacklist */
+
+    mounts = setmntent ("/proc/self/mounts", "r");
+    if (mounts == NULL) {
+        perror ("setmntent");
+        exit (1);
+    }
+
+    while ((mount = getmntent (mounts)) != NULL) {
+        /* Only consider mounts which have an actual device or bind mount
+         * point. The others are stuff like proc, sysfs, binfmt_misc etc. which
+         * are virtual and do not actually cause disk access. */
+        if (access (mount->mnt_fsname, F_OK) != 0) {
+            //printf("IGNORE: fsname: %s dir: %s type: %s\n", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type);
+            continue;
+        }
+
+        //printf("Adding watch for %s mount %s\n", mount->mnt_type, mount->mnt_dir);
+        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, 
+                FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_ONDIR | FAN_EVENT_ON_CHILD,
+                AT_FDCWD, mount->mnt_dir);
+        if (res < 0) {
+            perror ("fanotify_mark");
+            exit (1);
+        }
+    }
+
+    endmntent (mounts);
+}
+
 int
 main()
 {
@@ -149,14 +194,8 @@ main()
         exit(1);
     }
 
-    res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, 
-            FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_ONDIR | FAN_EVENT_ON_CHILD,
-            AT_FDCWD, ".");
-    if (res < 0) {
-        perror ("fanotify_mark");
-        exit(1);
-    }
-    
+    setup_fanotify (fan_fd);
+
     while (1) {
         res = read (fan_fd, &buffer, 4096);
         if (res < 0) {
