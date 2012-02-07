@@ -118,6 +118,7 @@ print_event(struct fanotify_event_metadata *data)
         }
     } else
         strcpy (buffer, "unknown");
+    close (fd);
 
     if (fstat (data->fd, &st) < 0) {
         perror ("stat");
