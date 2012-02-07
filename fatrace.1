@@ -30,6 +30,11 @@ output line. To avoid this, redirect the output into a file.
 .SH OPTIONS
 
 .TP
+.B \-c\fR, \fB\-\-current-mount
+Only record events on partition/mount of current directory. Without this
+option, all (real) partitions/mount points are being watched.
+
+.TP
 .B \-o \fIFILE\fR, \fB\-\-output=\fIFILE
 Write events to given file instead of standard output.
 

@@ -34,6 +34,7 @@
 /* command line options */
 char* option_output = NULL;
 long option_timeout = -1;
+int option_current_mount = 0;
 
 /* --time alarm sets this to 0 */
 volatile int running = 1;
@@ -148,7 +149,8 @@ print_event(struct fanotify_event_metadata *data)
  *
  * @fan_fd: fanotify file descriptor as returned by fanotify_init().
  *
- * Set up fanotify watches on all mount points.
+ * Set up fanotify watches on all mount points, or on the current directory
+ * mount if --current-mount is given.
  */
 void
 setup_fanotify(int fan_fd)
@@ -157,8 +159,19 @@ setup_fanotify(int fan_fd)
     FILE* mounts;
     struct mntent* mount;
     
-    /* blacklist */
+    if (option_current_mount) {
+        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, 
+                FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_ONDIR | FAN_EVENT_ON_CHILD,
+                AT_FDCWD, ".");
+        if (res < 0) {
+            perror ("fanotify_mark");
+            exit (1);
+        }
 
+        return;
+    }
+
+    /* iterate over all mounts */
     mounts = setmntent ("/proc/self/mounts", "r");
     if (mounts == NULL) {
         perror ("setmntent");
@@ -198,6 +211,7 @@ help ()
     puts ("Usage: fatrace [options...] \n"
 "\n"
 "Options:\n"
+"  -c, --current-mount\t\tOnly record events on partition/mount of current directory.\n"
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -t SECONDS, --time=SECONDS\tStop after the given number of seconds.\n"
 "  -h, --help\t\t\tShow help.");
@@ -215,14 +229,15 @@ parse_args (int argc, char** argv)
     char *endptr;
 
     static struct option long_options[] = {
-        {"output", required_argument, 0, 'o'},
-        {"time",   required_argument, 0, 't'},
-        {"help",   no_argument,       0, 'h'},
-        {0,        0,                 0,  0 }
+        {"current-mount", no_argument,       0, 'c'},
+        {"output",        required_argument, 0, 'o'},
+        {"time",          required_argument, 0, 't'},
+        {"help",          no_argument,       0, 'h'},
+        {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "ho:t:", long_options, NULL);
+        c = getopt_long (argc, argv, "ho:t:c", long_options, NULL);
 
         if (c == -1)
             break;
@@ -238,6 +253,10 @@ parse_args (int argc, char** argv)
                     fputs ("Error: Invalid number of seconds\n", stderr);
                     exit (1);
                 }
+                break;
+
+            case 'c':
+                option_current_mount = 1;
                 break;
 
             case 'h':
