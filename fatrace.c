@@ -155,7 +155,7 @@ print_event(struct fanotify_event_metadata *data)
     /* print event */
     if (option_timestamp) {
         strftime (timestamp, sizeof (timestamp), "%H:%M:%S", localtime (&event_time.tv_sec));
-        printf ("%s.%6li ", timestamp, event_time.tv_usec);
+        printf ("%s.%06li ", timestamp, event_time.tv_usec);
     }
     printf ("%s(%i): %s ", procname, data->pid, mask2str (data->mask));
     if (path != NULL)
