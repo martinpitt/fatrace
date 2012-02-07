@@ -139,6 +139,9 @@ main()
     int res;
     static char buffer[4096];
     struct fanotify_event_metadata *data;
+    pid_t my_pid;
+
+    my_pid = getpid();
 
     fan_fd = fanotify_init (0, 0);
     if (fan_fd < 0) {
@@ -162,7 +165,8 @@ main()
         }
         data = (struct fanotify_event_metadata *) &buffer;
         while (FAN_EVENT_OK (data, res)) {
-            print_event (data);
+            if (data->pid != my_pid)
+                print_event (data);
             close (data->fd);
             data = FAN_EVENT_NEXT (data, res);
         }
