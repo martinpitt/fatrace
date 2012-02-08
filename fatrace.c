@@ -363,7 +363,8 @@ main (int argc, char** argv)
 {
     int fan_fd;
     int res;
-    static char buffer[4096];
+    int err;
+    void *buffer;
     struct fanotify_event_metadata *data;
     struct sigaction sa;
 
@@ -381,6 +382,14 @@ main (int argc, char** argv)
     }
 
     setup_fanotify (fan_fd);
+
+    /* allocate memory for fanotify */
+    buffer = NULL;
+    err = posix_memalign (&buffer, 4096, 4096);
+    if (err != 0 || buffer == NULL) {
+        fprintf(stderr, "Failed to allocate buffer: %s\n", strerror (err));
+        exit(1);
+    }
 
     /* output file? */
     if (option_output) {
@@ -417,12 +426,12 @@ main (int argc, char** argv)
 
     /* read all events in a loop */
     while (running) {
-        res = read (fan_fd, &buffer, 4096);
+        res = read (fan_fd, buffer, 4096);
         if (res < 0 && errno != EINTR) {
             perror ("read");
             exit(1);
         }
-        data = (struct fanotify_event_metadata *) &buffer;
+        data = (struct fanotify_event_metadata *) buffer;
         while (FAN_EVENT_OK (data, res)) {
             if (show_pid (data->pid))
                 print_event (data);
