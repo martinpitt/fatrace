@@ -34,15 +34,15 @@
 #include <sys/time.h>
 
 /* command line options */
-char* option_output = NULL;
-long option_timeout = -1;
-int option_current_mount = 0;
-int option_timestamp = 0;
-pid_t ignored_pids[1024];
-unsigned ignored_pids_len = 0;
+static char* option_output = NULL;
+static long option_timeout = -1;
+static int option_current_mount = 0;
+static int option_timestamp = 0;
+static pid_t ignored_pids[1024];
+static unsigned ignored_pids_len = 0;
 
 /* --time alarm sets this to 0 */
-volatile int running = 1;
+static volatile int running = 1;
 
 /**
  * mask2str:
@@ -51,7 +51,7 @@ volatile int running = 1;
  *
  * Returns: decoded mask; only valid until the next call, do not free.
  */
-const char*
+static const char*
 mask2str (uint64_t mask)
 {
     static char buffer[10];
@@ -78,7 +78,7 @@ mask2str (uint64_t mask)
  * Returns: File path that corresponds to the given stat, or NULL if it cannot
  * be determined. Only valid until the next call. Do not free.
  */
-const char*
+static const char*
 stat2path (pid_t pid, const struct stat *search)
 {
     static char fddirname[PATH_MAX];
@@ -116,7 +116,7 @@ stat2path (pid_t pid, const struct stat *search)
  *
  * Print data from fanotify_event_metadata struct to stdout.
  */
-void
+static void
 print_event(struct fanotify_event_metadata *data)
 {
     int fd, len;
@@ -174,7 +174,7 @@ print_event(struct fanotify_event_metadata *data)
  * Set up fanotify watches on all mount points, or on the current directory
  * mount if --current-mount is given.
  */
-void
+static void
 setup_fanotify(int fan_fd)
 {
     int res;
@@ -227,8 +227,8 @@ setup_fanotify(int fan_fd)
  *
  * Show help.
  */
-void
-help ()
+static void
+help (void)
 {
     puts ("Usage: fatrace [options...] \n"
 "\n"
@@ -246,7 +246,7 @@ help ()
  *
  * Parse command line arguments and set the global option_* variables.
  */
-void
+static void
 parse_args (int argc, char** argv)
 {
     int c;
@@ -326,7 +326,7 @@ parse_args (int argc, char** argv)
  *
  * Returns: 1 if PID is to be logged, 0 if not.
  */
-int
+static int
 show_pid (pid_t pid)
 {
     int i;
@@ -337,7 +337,7 @@ show_pid (pid_t pid)
     return 1;
 }
 
-void
+static void
 alarm_handler (int signal)
 {
     if (signal == SIGALRM)
