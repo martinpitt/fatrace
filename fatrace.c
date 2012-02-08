@@ -427,7 +427,13 @@ main (int argc, char** argv)
     /* read all events in a loop */
     while (running) {
         res = read (fan_fd, buffer, 4096);
-        if (res < 0 && errno != EINTR) {
+        if (res == 0) {
+            fprintf (stderr, "No more fanotify event (EOF)\n");
+            break;
+        }
+        if (res < 0) {
+            if (errno == EINTR)
+                continue;
             perror ("read");
             exit(1);
         }
