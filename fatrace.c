@@ -39,7 +39,7 @@ static long option_timeout = -1;
 static int option_current_mount = 0;
 static int option_timestamp = 0;
 static pid_t ignored_pids[1024];
-static unsigned ignored_pids_len = 0;
+static unsigned int ignored_pids_len = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -329,7 +329,7 @@ parse_args (int argc, char** argv)
 static int
 show_pid (pid_t pid)
 {
-    int i;
+    unsigned int i;
     for (i = 0; i < ignored_pids_len; ++i)
         if (pid == ignored_pids[i])
             return 0;

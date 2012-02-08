@@ -1,6 +1,6 @@
 VERSION=$(shell head -n1 NEWS | cut -f1 -d' ')
 
-CFLAGS ?= -O2 -g -Wall -Werror
+CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PREFIX ?= /usr/local
 
 fatrace: fatrace.o
