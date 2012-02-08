@@ -186,7 +186,7 @@ setup_fanotify(int fan_fd)
                 FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_ONDIR | FAN_EVENT_ON_CHILD,
                 AT_FDCWD, ".");
         if (res < 0) {
-            perror ("fanotify_mark");
+            fprintf(stderr, "Failed to add watch for current directory: %s\n", strerror (errno));
             exit (1);
         }
 
@@ -214,8 +214,8 @@ setup_fanotify(int fan_fd)
                 FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_ONDIR | FAN_EVENT_ON_CHILD,
                 AT_FDCWD, mount->mnt_dir);
         if (res < 0) {
-            perror ("fanotify_mark");
-            exit (1);
+            fprintf(stderr, "Failed to add watch for %s mount %s: %s\n",
+                    mount->mnt_type, mount->mnt_dir, strerror (errno));
         }
     }
 
