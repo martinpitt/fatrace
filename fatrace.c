@@ -119,7 +119,8 @@ stat2path (pid_t pid, const struct stat *search)
 static void
 print_event(struct fanotify_event_metadata *data)
 {
-    int fd, len;
+    int fd;
+    ssize_t len;
     static char procname[100];
     static char timestamp[100];
     struct stat st;
@@ -136,16 +137,21 @@ print_event(struct fanotify_event_metadata *data)
 
     /* read process name */
     snprintf (procname, sizeof (procname), "/proc/%i/comm", data->pid);
+    len = 0;
     fd = open (procname, O_RDONLY);
-    if (fd > 0) {
-        len = read (fd, procname, 100);
+    if (fd >= 0) {
+        len = read (fd, procname, sizeof (procname));
         while (len > 0 && procname[len-1] == '\n') {
-            procname[len-1] = '\0';
             len--;
         }
-    } else
+    }
+    if (len > 0) {
+	procname[len] = '\0';
+    } else {
         strcpy (procname, "unknown");
-    close (fd);
+    }
+    if (fd >= 0)
+	close (fd);
 
     /* try to figure out the path name */
     if (fstat (data->fd, &st) < 0) {
