@@ -380,7 +380,9 @@ main (int argc, char** argv)
             perror ("Failed to open output file");
             exit (1);
         }
+        fflush (stdout);
         dup2 (fd, STDOUT_FILENO);
+        close (fd);
     }
 
     /* set up --time alarm */
