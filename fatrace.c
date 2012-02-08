@@ -394,7 +394,7 @@ main (int argc, char** argv)
 
     /* output file? */
     if (option_output) {
-        int fd = open (option_output, O_CREAT|O_WRONLY, 0666);
+        int fd = open (option_output, O_CREAT|O_WRONLY|O_EXCL, 0666);
         if (fd < 0) {
             perror ("Failed to open output file");
             exit (1);
