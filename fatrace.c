@@ -43,6 +43,7 @@ static unsigned int ignored_pids_len = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
+static volatile int signaled = 0;
 
 /**
  * mask2str:
@@ -344,10 +345,17 @@ show_pid (pid_t pid)
 }
 
 static void
-alarm_handler (int signal)
+signal_handler (int signal)
 {
-    if (signal == SIGALRM)
-        running = 0;
+    (void)signal;
+
+    /* ask the main loop to stop */
+    running = 0;
+    signaled++;
+
+    /* but if stuck in some others functions, just quit now */
+    if (signaled > 1)
+        _exit(1);
 }
 
 int
@@ -357,6 +365,7 @@ main (int argc, char** argv)
     int res;
     static char buffer[4096];
     struct fanotify_event_metadata *data;
+    struct sigaction sa;
 
     /* always ignore events from ourselves (writing log file) */
     ignored_pids[ignored_pids_len++] = getpid();
@@ -385,10 +394,18 @@ main (int argc, char** argv)
         close (fd);
     }
 
+    /* setup signal handler to cleanly stop the program */
+    sa.sa_handler = signal_handler; 
+    sigemptyset (&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction (SIGINT, &sa, NULL) < 0) {
+        perror ("sigaction");
+        exit (1);
+    }
+
     /* set up --time alarm */
     if (option_timeout > 0) {
-        struct sigaction sa;
-        sa.sa_handler = alarm_handler; 
+        sa.sa_handler = signal_handler; 
         sigemptyset (&sa.sa_mask);
         sa.sa_flags = 0;
         if (sigaction (SIGALRM, &sa, NULL) < 0) {
