@@ -1,5 +1,10 @@
 0.2 (UNRELEASED)
 ----------------
+Improvements:
+ - --output does not overwrite already existing files.
+ - Some code cleanup and robustification, thanks Yann Droneaud!
+ - Proper handling of Control-C (SIGINT), thanks Yann Droneaud!
+
 Bug fixes:
  - Listen to "close" events as well.
 
