@@ -1,3 +1,8 @@
+0.2 (UNRELEASED)
+----------------
+Bug fixes:
+ - Listen to "close" events as well.
+
 0.1 (2012-02-07)
 ----------------
 Initial version.
