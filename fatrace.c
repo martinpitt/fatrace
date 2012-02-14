@@ -162,9 +162,11 @@ print_event(struct fanotify_event_metadata *data)
     path = stat2path (data->pid, &st);
 
     /* print event */
-    if (option_timestamp) {
+    if (option_timestamp == 1) {
         strftime (timestamp, sizeof (timestamp), "%H:%M:%S", localtime (&event_time.tv_sec));
         printf ("%s.%06li ", timestamp, event_time.tv_usec);
+    } else if (option_timestamp == 2) {
+        printf ("%li.%06li ", event_time.tv_sec, event_time.tv_usec);
     }
     printf ("%s(%i): %s ", procname, data->pid, mask2str (data->mask));
     if (path != NULL)
@@ -243,7 +245,7 @@ help (void)
 "  -c, --current-mount\t\tOnly record events on partition/mount of current directory.\n"
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
-"  -t, --timestamp\t\tAdd timestamp to events.\n"
+"  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -i PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
 "  -h, --help\t\t\tShow help.");
 }
@@ -308,7 +310,10 @@ parse_args (int argc, char** argv)
                 break;
 
             case 't':
-                option_timestamp = 1;
+                if (++option_timestamp > 2) {
+                    fputs ("Error: --timestamp option can be given at most two times\n", stderr);
+                    exit (1);
+                };
                 break;
 
             case 'h':

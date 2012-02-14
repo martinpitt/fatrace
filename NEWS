@@ -4,6 +4,8 @@ Improvements:
  - --output does not overwrite already existing files.
  - Some code cleanup and robustification, thanks Yann Droneaud!
  - Proper handling of Control-C (SIGINT), thanks Yann Droneaud!
+ - When specifying --timestamp twice, print time as seconds since epoch, which
+   is easier for automatic post-processing.
 
 Bug fixes:
  - Listen to "close" events as well.

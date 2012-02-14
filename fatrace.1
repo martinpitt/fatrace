@@ -59,7 +59,7 @@ such a process in more detail, you should consider using
 .RE
 If you specify the
 .B \-\-timestamp
-option, the first field will be the current time (including microseconds).
+option, the first field will be the current time. 
 
 .SH OPTIONS
 
@@ -78,7 +78,9 @@ Stop after the given number of seconds.
 
 .TP
 .B \-t\fR, \fB\-\-timestamp
-Add timestamp to events.
+Add timestamp to events. When this option is given once, the format will be a
+human readable hour:minute:second.microsecond; when given twice, the timestamp
+is printed as seconds/microseconds since the epoch.
 
 .TP
 .B \-p \fIPID\fR, \fB\-\-ignore\-pid=\fIPID
