@@ -2,6 +2,8 @@
 ----------------
 Bug fixes:
  - Fix --ignore-pid short option (-p, not -i) in --help.
+ - Tell apart closing for reading ("C") and closing for writing ("CW"). Point
+   this out in the manpage.
 
 0.2 (2012-02-15)
 ----------------

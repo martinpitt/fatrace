@@ -61,10 +61,10 @@ mask2str (uint64_t mask)
     memset (buffer, 0, sizeof (buffer));
     if (mask & FAN_ACCESS)
         buffer[offset++] = 'R';
-    if (mask & FAN_MODIFY)
-        buffer[offset++] = 'W';
     if (mask & FAN_CLOSE_WRITE || mask & FAN_CLOSE_NOWRITE)
         buffer[offset++] = 'C';
+    if (mask & FAN_MODIFY || mask & FAN_CLOSE_WRITE)
+        buffer[offset++] = 'W';
     if (mask & FAN_OPEN)
         buffer[offset++] = 'O';
 
