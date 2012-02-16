@@ -1,4 +1,4 @@
-0.2 (UNRELEASED)
+0.2 (2012-02-15)
 ----------------
 Improvements:
  - --output does not overwrite already existing files.
