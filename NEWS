@@ -1,3 +1,8 @@
+0.3 (UNRELEASED)
+----------------
+Bug fixes:
+ - Fix --ignore-pid short option (-p, not -i) in --help.
+
 0.2 (2012-02-15)
 ----------------
 Improvements:

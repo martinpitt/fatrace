@@ -208,7 +208,7 @@ help (void)
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
-"  -i PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
+"  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
