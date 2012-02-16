@@ -9,6 +9,8 @@ Improvements:
 
 Bug fixes:
  - Listen to "close" events as well.
+ - Simplify and robustify determination of path names. This also fixes the
+   races which led to many events being shown with device/inode only.
 
 0.1 (2012-02-07)
 ----------------

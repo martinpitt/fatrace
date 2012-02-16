@@ -72,47 +72,6 @@ mask2str (uint64_t mask)
 }
 
 /**
- * stat2path:
- *
- * Try to resolve a struct stat from a PID to a pathname.
- *
- * Returns: File path that corresponds to the given stat, or NULL if it cannot
- * be determined. Only valid until the next call. Do not free.
- */
-static const char*
-stat2path (pid_t pid, const struct stat *search)
-{
-    static char fddirname[PATH_MAX];
-    static char buffer[PATH_MAX];
-    DIR* fddir;
-    int fddirfd;
-    struct dirent* entry;
-    struct stat st;
-    char* result = NULL;
-    int len;
-
-    snprintf (fddirname, sizeof (fddirname), "/proc/%i/fd", pid);
-    fddir = opendir (fddirname);
-    if (fddir == NULL)
-        return NULL;
-    fddirfd = dirfd (fddir);
-
-    while ((entry = readdir (fddir)) != NULL) {
-        if (fstatat (fddirfd, entry->d_name, &st, 0) < 0)
-            continue;
-        if (st.st_ino == search->st_ino && st.st_dev == search->st_dev) {
-            len = readlinkat (fddirfd, entry->d_name, buffer, sizeof (buffer));
-            if (len > 0) {
-                buffer[len] = '\0';
-                result = buffer;
-            }
-        }
-    }
-    closedir (fddir);
-    return result;
-}
-
-/**
  * print_event:
  *
  * Print data from fanotify_event_metadata struct to stdout.
@@ -124,8 +83,8 @@ print_event(struct fanotify_event_metadata *data)
     ssize_t len;
     static char printbuf[100];
     static char procname[100];
+    static char pathname[PATH_MAX];
     struct stat st;
-    const char* path;
     struct timeval event_time;
 
     /* get event time, if requested */
@@ -155,11 +114,18 @@ print_event(struct fanotify_event_metadata *data)
 	close (fd);
 
     /* try to figure out the path name */
-    if (fstat (data->fd, &st) < 0) {
-        perror ("stat");
-        exit (1);
+    snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", data->fd);
+    len = readlink (printbuf, pathname, sizeof (pathname));
+    if (len < 0) {
+        /* fall back to the device/inode */
+        if (fstat (data->fd, &st) < 0) {
+            perror ("stat");
+            exit (1);
+        }
+        snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
+    } else {
+        pathname[len] = '\0';
     }
-    path = stat2path (data->pid, &st);
 
     /* print event */
     if (option_timestamp == 1) {
@@ -168,11 +134,7 @@ print_event(struct fanotify_event_metadata *data)
     } else if (option_timestamp == 2) {
         printf ("%li.%06li ", event_time.tv_sec, event_time.tv_usec);
     }
-    printf ("%s(%i): %s ", procname, data->pid, mask2str (data->mask));
-    if (path != NULL)
-        puts (path);
-    else
-        printf ("device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
+    printf ("%s(%i): %s %s\n", procname, data->pid, mask2str (data->mask), pathname);
 }
 
 /**
