@@ -122,8 +122,8 @@ print_event(struct fanotify_event_metadata *data)
 {
     int fd;
     ssize_t len;
+    static char printbuf[100];
     static char procname[100];
-    static char timestamp[100];
     struct stat st;
     const char* path;
     struct timeval event_time;
@@ -137,9 +137,9 @@ print_event(struct fanotify_event_metadata *data)
     }
 
     /* read process name */
-    snprintf (procname, sizeof (procname), "/proc/%i/comm", data->pid);
+    snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
     len = 0;
-    fd = open (procname, O_RDONLY);
+    fd = open (printbuf, O_RDONLY);
     if (fd >= 0) {
         len = read (fd, procname, sizeof (procname));
         while (len > 0 && procname[len-1] == '\n') {
@@ -163,8 +163,8 @@ print_event(struct fanotify_event_metadata *data)
 
     /* print event */
     if (option_timestamp == 1) {
-        strftime (timestamp, sizeof (timestamp), "%H:%M:%S", localtime (&event_time.tv_sec));
-        printf ("%s.%06li ", timestamp, event_time.tv_usec);
+        strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time.tv_sec));
+        printf ("%s.%06li ", printbuf, event_time.tv_usec);
     } else if (option_timestamp == 2) {
         printf ("%li.%06li ", event_time.tv_sec, event_time.tv_usec);
     }
