@@ -1,3 +1,11 @@
+0.4 (UNRELEASED)
+----------------
+Improvements:
+ - Add power-usage-report script which uses fatrace and powertop-1.13 to
+   collect data about file accesses, wakeups, and device stats and generates a
+   developer/power-user oriented report which can be used for identifying power
+   usage problems.
+
 0.3 (2-12-02-17)
 ----------------
 Bug fixes:

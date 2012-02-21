@@ -1,0 +1,202 @@
+#!/usr/bin/python
+
+# (C) 2012 Canonical Ltd.
+# Author: Martin Pitt <martin.pitt@ubuntu.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+import subprocess
+import argparse
+import sys
+import os
+import stat
+import time
+import re
+import functools
+
+# standard time for measuring in seconds
+DURATION = 60
+
+def check_dependencies():
+    '''Check if necessary programs are installed and privileges are available.'''
+
+    err = ''
+
+    if os.geteuid() != 0:
+        err += 'You need to run this program as root.\n\n'
+
+    if subprocess.call(['which', 'powertop-1.13'], stdout=subprocess.PIPE) != 0:
+        err += 'powertop-1.13 not found, please install it.\n\n'
+
+    if err:
+        sys.stderr.write(err)
+        sys.exit(1)
+
+def probe():
+    '''Call probes and return their output in a dict.'''
+
+    # ensure that programs run without translations, to avoid breaking parsing
+    env = os.environ.copy()
+    env['LC_MESSAGES'] = 'C'
+
+    sys.stderr.write('Starting measurement for %i seconds...\n' % DURATION)
+    powertop = subprocess.Popen(['powertop-1.13', '-d', '-t', str(DURATION+1)],
+            stdout=subprocess.PIPE, env=env)
+    # let powertop initialize; calls lspci and some shell scripts which skew
+    # the fatrace results
+    time.sleep(1)
+
+    fatrace = subprocess.Popen(['fatrace', '-tts', str(DURATION), 
+        '-p', str(powertop.pid)], stdout=subprocess.PIPE, env=env)
+
+    output = {}
+    output['fatrace'] = fatrace.communicate()[0].decode('UTF-8', errors='ignore')
+    output['powertop'] = powertop.communicate()[0].decode('UTF-8', errors='ignore')
+
+    return output
+
+def parse_fatrace_events(lines):
+    '''Parse fatrace output lines.
+
+    Split lines into fields, filter out bursts of identical events (usually
+    from reading/writing larger blocks).
+    
+    Return array of (program, pid, mode, file) tuples.
+    '''
+    event_re = re.compile('(\d+.\d+) (\S+)\((\d+)\): ([A-Z]+) (.+)$')
+
+    prev_timestamp = None
+    prev_match = None
+
+    events = []
+
+    for line in lines:
+        m = event_re.match(line)
+        if not m:
+            sys.stderr.write('Ignoring unparseable line: %s\n' % line)
+            continue
+
+        timestamp = float(m.group(1))
+        event = m.groups()[1:]
+        if prev_timestamp and (timestamp - prev_timestamp < 0.01) and event == events[-1]:
+            continue
+        prev_timestamp = timestamp
+
+        events.append(event)
+
+    return events
+
+def group_fatrace_events(events):
+    '''Group fatrace events.
+
+    Return dict program -> file > [#reads,#writes]
+    '''
+    groups = {}
+    for event in events:
+        if event[2] == 'C':
+            # ignore read-close events for now
+            continue
+
+        stat = groups.setdefault(event[0], {}).setdefault(event[3], [0, 0])
+        if 'W' in event[2]:
+            stat[1] += 1
+        elif event[2] in ('R', 'O', 'RO'):
+            stat[0] += 1
+
+    return groups
+
+def fatrace_report(raw_out):
+    '''Generate disk access report from raw fatrace output'''
+
+    lines = raw_out.splitlines()
+    event_lines = parse_fatrace_events(lines)
+    events = group_fatrace_events(event_lines)
+
+    # sort programs by number of events
+    events_per_prog = []
+    for prog, filemap in events.items():
+        count = functools.reduce(lambda sum, rw: sum + rw[0] + rw[1], filemap.values(), 0)
+        events_per_prog.append((prog, count))
+    events_per_prog.sort(key=lambda i: i[1], reverse=True)
+
+    for (prog, count) in events_per_prog:
+        print('======= %s: %i file access events ======' % (prog, count))
+        for file, (r, w) in events[prog].items():
+            s = file + ':'
+            if r > 0:
+                s += ' %i reads' % r
+            if w > 0:
+                s += ' %i writes' % w
+            print(s)
+        print('')
+
+def powertop_report(raw_out):
+    '''Generate report from raw powertop output'''
+
+    # filter out multiple empty lines
+    lines = re.sub('\n{3,}', '\n\n', raw_out, re.S).splitlines()
+
+    i = 0
+    # skip headers until wakeups
+    while i < len(lines) and not lines[i].startswith('Top causes for wakeups'):
+        i += 1
+    i += 1 # skip "top causes..." line
+
+    print('====== Wakeups ======')
+    while i < len(lines) and lines[i]:
+        # skip "[Rescheduling interrupts] <kernel IPI>", it's distracting and
+        # wanted
+        if 'Rescheduling interrupts' not in lines[i]:
+            print(lines[i])
+        i += 1
+    print('')
+
+    while i < len(lines) and not lines[i]:
+        i += 1
+
+    print('====== Devices ======')
+    skip_par = False
+    while i < len(lines):
+        # suggestions make more sense for interactive mode, skip
+        if lines[i].startswith('Suggestion:'):
+            skip_par = True
+
+        # writes are already covered by fatrace
+        if 'is writing to' in lines[i]:
+            skip_par = True
+
+        if skip_par:
+            if not lines[i].strip():
+                skip_par = False
+        else:
+            print(lines[i])
+
+        i += 1
+
+def main():
+    check_dependencies()
+
+    # Announce that we are about to start
+    sys.stderr.write('''Measurement will begin in 5 seconds. Please make sure that the
+computer is idle, i. e. do not press keys, start or operate programs, and that
+programs are not busy with active tasks other than the one you want to examine.\n''')
+    time.sleep(5)
+
+    output = probe()
+
+    sys.stderr.write('Measurement complete. Generating report...\n')
+    fatrace_report(output['fatrace'])
+    powertop_report(output['powertop'])
+
+if __name__ == '__main__':
+    main()
