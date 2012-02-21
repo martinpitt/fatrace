@@ -77,7 +77,7 @@ mask2str (uint64_t mask)
  * Print data from fanotify_event_metadata struct to stdout.
  */
 static void
-print_event(struct fanotify_event_metadata *data)
+print_event(const struct fanotify_event_metadata *data)
 {
     int fd;
     ssize_t len;
