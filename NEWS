@@ -6,7 +6,7 @@ Improvements:
    developer/power-user oriented report which can be used for identifying power
    usage problems.
 
-0.3 (2-12-02-17)
+0.3 (2012-02-17)
 ----------------
 Bug fixes:
  - Fix --ignore-pid short option (-p, not -i) in --help.
