@@ -58,7 +58,6 @@ mask2str (uint64_t mask)
     static char buffer[10];
     int offset = 0;
 
-    memset (buffer, 0, sizeof (buffer));
     if (mask & FAN_ACCESS)
         buffer[offset++] = 'R';
     if (mask & FAN_CLOSE_WRITE || mask & FAN_CLOSE_NOWRITE)
@@ -67,6 +66,7 @@ mask2str (uint64_t mask)
         buffer[offset++] = 'W';
     if (mask & FAN_OPEN)
         buffer[offset++] = 'O';
+    buffer[offset] = '\0';
 
     return buffer;
 }
