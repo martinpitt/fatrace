@@ -58,7 +58,6 @@ mask2str (uint64_t mask)
     static char buffer[10];
     int offset = 0;
 
-    memset (buffer, 0, sizeof (buffer));
     if (mask & FAN_ACCESS)
         buffer[offset++] = 'R';
     if (mask & FAN_CLOSE_WRITE || mask & FAN_CLOSE_NOWRITE)
@@ -67,6 +66,7 @@ mask2str (uint64_t mask)
         buffer[offset++] = 'W';
     if (mask & FAN_OPEN)
         buffer[offset++] = 'O';
+    buffer[offset] = '\0';
 
     return buffer;
 }
@@ -77,7 +77,8 @@ mask2str (uint64_t mask)
  * Print data from fanotify_event_metadata struct to stdout.
  */
 static void
-print_event(struct fanotify_event_metadata *data)
+print_event(const struct fanotify_event_metadata *data,
+            const struct timeval *event_time)
 {
     int fd;
     ssize_t len;
@@ -85,15 +86,6 @@ print_event(struct fanotify_event_metadata *data)
     static char procname[100];
     static char pathname[PATH_MAX];
     struct stat st;
-    struct timeval event_time;
-
-    /* get event time, if requested */
-    if (option_timestamp) {
-        if (gettimeofday (&event_time, NULL) < 0) {
-            perror ("gettimeofday");
-            exit (1);
-        }
-    }
 
     /* read process name */
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
@@ -129,10 +121,10 @@ print_event(struct fanotify_event_metadata *data)
 
     /* print event */
     if (option_timestamp == 1) {
-        strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time.tv_sec));
-        printf ("%s.%06li ", printbuf, event_time.tv_usec);
+        strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time->tv_sec));
+        printf ("%s.%06li ", printbuf, event_time->tv_usec);
     } else if (option_timestamp == 2) {
-        printf ("%li.%06li ", event_time.tv_sec, event_time.tv_usec);
+        printf ("%li.%06li ", event_time->tv_sec, event_time->tv_usec);
     }
     printf ("%s(%i): %s %s\n", procname, data->pid, mask2str (data->mask), pathname);
 }
@@ -334,6 +326,7 @@ main (int argc, char** argv)
     void *buffer;
     struct fanotify_event_metadata *data;
     struct sigaction sa;
+    struct timeval event_time;
 
     /* always ignore events from ourselves (writing log file) */
     ignored_pids[ignored_pids_len++] = getpid();
@@ -392,6 +385,11 @@ main (int argc, char** argv)
         alarm (option_timeout);
     }
 
+    /* clear event time if timestamp is not required */
+    if (!option_timestamp) {
+        memset(&event_time, 0, sizeof(struct timeval));
+    }
+
     /* read all events in a loop */
     while (running) {
         res = read (fan_fd, buffer, 4096);
@@ -405,10 +403,19 @@ main (int argc, char** argv)
             perror ("read");
             exit(1);
         }
+
+        /* get event time, if requested */
+        if (option_timestamp) {
+            if (gettimeofday (&event_time, NULL) < 0) {
+                perror ("gettimeofday");
+                exit (1);
+            }
+        }
+
         data = (struct fanotify_event_metadata *) buffer;
         while (FAN_EVENT_OK (data, res)) {
             if (show_pid (data->pid))
-                print_event (data);
+                print_event (data, &event_time);
             close (data->fd);
             data = FAN_EVENT_NEXT (data, res);
         }
