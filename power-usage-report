@@ -16,10 +16,8 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import subprocess
-import argparse
 import sys
 import os
-import stat
 import time
 import re
 import functools
@@ -83,7 +81,6 @@ def parse_fatrace_events(lines):
     event_re = re.compile('(\d+.\d+) (\S+)\((\d+)\): ([A-Z]+) (.+)$')
 
     prev_timestamp = None
-    prev_match = None
 
     events = []
 
