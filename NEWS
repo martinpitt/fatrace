@@ -4,6 +4,7 @@ Improvements:
  - Some code optimizations, thanks Yann Droneaud!
  - power-usage-report: Use current powertop 2 (LP: #937703)
  - power-usage-report: Use Python 3
+ - power-usage-report: Include "Process Device Activity" section from powertop
 
 0.4 (2012-02-21)
 ----------------

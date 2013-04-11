@@ -157,6 +157,7 @@ def powertop_report(raw_out):
     blocks = [
         ('Overview of Software Power Consumers', 'Wakeups'),
         ('Device Power Report', 'Devices'),
+        ('Process Device Activity', 'Process Device Activity'),
     ]
 
     # filter out multiple empty lines
