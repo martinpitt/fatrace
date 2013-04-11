@@ -26,6 +26,7 @@ import tempfile
 # standard time for measuring in seconds
 DURATION = 60
 
+
 def check_dependencies():
     '''Check if necessary programs are installed and privileges are available.'''
 
@@ -40,6 +41,7 @@ def check_dependencies():
     if err:
         sys.stderr.write(err)
         sys.exit(1)
+
 
 def probe():
     '''Call probes and return their output in a dict.'''
@@ -59,8 +61,8 @@ def probe():
     time.sleep(1)
 
     output = {}
-    fatrace = subprocess.Popen(['fatrace', '-tts', str(DURATION), 
-        '-p', str(powertop.pid)], stdout=subprocess.PIPE, env=env)
+    fatrace = subprocess.Popen(['fatrace', '-tts', str(DURATION), '-p', str(powertop.pid)],
+                               stdout=subprocess.PIPE, env=env)
     output['fatrace'] = fatrace.communicate()[0].decode('UTF-8', errors='ignore')
 
     powertop.communicate()
@@ -70,12 +72,13 @@ def probe():
 
     return output
 
+
 def parse_fatrace_events(lines):
     '''Parse fatrace output lines.
 
     Split lines into fields, filter out bursts of identical events (usually
     from reading/writing larger blocks).
-    
+
     Return array of (program, pid, mode, file) tuples.
     '''
     event_re = re.compile('(\d+.\d+) (\S+)\((\d+)\): ([A-Z]+) (.+)$')
@@ -100,6 +103,7 @@ def parse_fatrace_events(lines):
 
     return events
 
+
 def group_fatrace_events(events):
     '''Group fatrace events.
 
@@ -118,6 +122,7 @@ def group_fatrace_events(events):
             stat[0] += 1
 
     return groups
+
 
 def fatrace_report(raw_out):
     '''Generate disk access report from raw fatrace output'''
@@ -144,6 +149,7 @@ def fatrace_report(raw_out):
             print(s)
         print('')
 
+
 def powertop_report(raw_out):
     '''Generate report from raw powertop output'''
 
@@ -161,7 +167,7 @@ def powertop_report(raw_out):
         # skip until search_header
         while i < len(lines) and not lines[i].startswith('**' + search_header):
             i += 1
-        i += 1 # skip header
+        i += 1  # skip header
         # skip empty lines
         while not lines[i]:
             i += 1
@@ -171,6 +177,7 @@ def powertop_report(raw_out):
             print(lines[i])
             i += 1
         print('')
+
 
 def main():
     check_dependencies()
