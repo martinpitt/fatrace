@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-# (C) 2012 Canonical Ltd.
+# (C) 2012, 2013 Canonical Ltd.
 # Author: Martin Pitt <martin.pitt@ubuntu.com>
 #
 # This program is free software: you can redistribute it and/or modify
@@ -23,6 +23,7 @@ import stat
 import time
 import re
 import functools
+import tempfile
 
 # standard time for measuring in seconds
 DURATION = 60
@@ -35,8 +36,8 @@ def check_dependencies():
     if os.geteuid() != 0:
         err += 'You need to run this program as root.\n\n'
 
-    if subprocess.call(['which', 'powertop-1.13'], stdout=subprocess.PIPE) != 0:
-        err += 'powertop-1.13 not found, please install it.\n\n'
+    if subprocess.call(['which', 'powertop'], stdout=subprocess.PIPE) != 0:
+        err += 'powertop not found, please install it.\n\n'
 
     if err:
         sys.stderr.write(err)
@@ -50,18 +51,24 @@ def probe():
     env['LC_MESSAGES'] = 'C'
 
     sys.stderr.write('Starting measurement for %i seconds...\n' % DURATION)
-    powertop = subprocess.Popen(['powertop-1.13', '-d', '-t', str(DURATION+1)],
-            stdout=subprocess.PIPE, env=env)
+    (fd, powertop_csv) = tempfile.mkstemp(suffix='.csv', prefix='powertop')
+    os.close(fd)
+    powertop = subprocess.Popen(['powertop', '--csv=' + powertop_csv,
+                                 '--time=' + str(DURATION + 1)],
+                                stdout=subprocess.PIPE, env=env)
     # let powertop initialize; calls lspci and some shell scripts which skew
     # the fatrace results
     time.sleep(1)
 
+    output = {}
     fatrace = subprocess.Popen(['fatrace', '-tts', str(DURATION), 
         '-p', str(powertop.pid)], stdout=subprocess.PIPE, env=env)
-
-    output = {}
     output['fatrace'] = fatrace.communicate()[0].decode('UTF-8', errors='ignore')
-    output['powertop'] = powertop.communicate()[0].decode('UTF-8', errors='ignore')
+
+    powertop.communicate()
+    with open(powertop_csv, 'rb') as f:
+        output['powertop'] = f.read().decode('UTF-8', errors='ignore')
+    os.unlink(powertop_csv)
 
     return output
 
@@ -143,45 +150,30 @@ def fatrace_report(raw_out):
 def powertop_report(raw_out):
     '''Generate report from raw powertop output'''
 
+    # map powertop's headers to our headers for interesting parts
+    blocks = [
+        ('Overview of Software Power Consumers', 'Wakeups'),
+        ('Device Power Report', 'Devices'),
+    ]
+
     # filter out multiple empty lines
     lines = re.sub('\n{3,}', '\n\n', raw_out, re.S).splitlines()
-
     i = 0
-    # skip headers until wakeups
-    while i < len(lines) and not lines[i].startswith('Top causes for wakeups'):
-        i += 1
-    i += 1 # skip "top causes..." line
 
-    print('====== Wakeups ======')
-    while i < len(lines) and lines[i]:
-        # skip "[Rescheduling interrupts] <kernel IPI>", it's distracting and
-        # wanted
-        if 'Rescheduling interrupts' not in lines[i]:
+    for (search_header, print_header) in blocks:
+        # skip until search_header
+        while i < len(lines) and not lines[i].startswith('**' + search_header):
+            i += 1
+        i += 1 # skip header
+        # skip empty lines
+        while not lines[i]:
+            i += 1
+
+        print('====== %s ======' % print_header)
+        while i < len(lines) and lines[i]:
             print(lines[i])
-        i += 1
-    print('')
-
-    while i < len(lines) and not lines[i]:
-        i += 1
-
-    print('====== Devices ======')
-    skip_par = False
-    while i < len(lines):
-        # suggestions make more sense for interactive mode, skip
-        if lines[i].startswith('Suggestion:'):
-            skip_par = True
-
-        # writes are already covered by fatrace
-        if 'is writing to' in lines[i]:
-            skip_par = True
-
-        if skip_par:
-            if not lines[i].strip():
-                skip_par = False
-        else:
-            print(lines[i])
-
-        i += 1
+            i += 1
+        print('')
 
 def main():
     check_dependencies()

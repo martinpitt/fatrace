@@ -2,6 +2,7 @@
 ----------------
 Improvements:
  - Some code optimizations, thanks Yann Droneaud!
+ - power-usage-report: Use current powertop 2 (LP: #937703)
 
 0.4 (2012-02-21)
 ----------------
