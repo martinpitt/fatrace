@@ -167,7 +167,8 @@ setup_fanotify(int fan_fd)
         /* Only consider mounts which have an actual device or bind mount
          * point. The others are stuff like proc, sysfs, binfmt_misc etc. which
          * are virtual and do not actually cause disk access. */
-        if (access (mount->mnt_fsname, F_OK) != 0) {
+        if (mount->mnt_fsname == NULL || access (mount->mnt_fsname, F_OK) != 0 ||
+            strchr(mount->mnt_fsname, '/') == NULL) {
             //printf("IGNORE: fsname: %s dir: %s type: %s\n", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type);
             continue;
         }

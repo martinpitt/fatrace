@@ -1,3 +1,9 @@
+0.6 (UNRELEASED)
+----------------
+Bug fixes:
+ - More careful check of uninteresting mount points, only consider those with a
+   '/' in it. Thanks Heinrich Schuchardt!
+
 0.5 (2013-04-11)
 ----------------
 Improvements:
