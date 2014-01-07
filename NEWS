@@ -1,4 +1,4 @@
-0.6 (UNRELEASED)
+0.6 (2014-01-07)
 ----------------
 Bug fixes:
  - More careful check of uninteresting mount points, only consider those with a
