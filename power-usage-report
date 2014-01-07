@@ -155,9 +155,9 @@ def powertop_report(raw_out):
 
     # map powertop's headers to our headers for interesting parts
     blocks = [
-        ('Overview of Software Power Consumers', 'Wakeups'),
-        ('Device Power Report', 'Devices'),
-        ('Process Device Activity', 'Process Device Activity'),
+        ('overview of software power consumers', 'Wakeups'),
+        ('device power report', 'Devices'),
+        ('process device activity', 'Process Device Activity'),
     ]
 
     # filter out multiple empty lines
@@ -166,7 +166,7 @@ def powertop_report(raw_out):
 
     for (search_header, print_header) in blocks:
         # skip until search_header
-        while i < len(lines) and not lines[i].startswith('**' + search_header):
+        while i < len(lines) and not lines[i].lower().startswith('**' + search_header):
             i += 1
         i += 1  # skip header
         # skip empty lines

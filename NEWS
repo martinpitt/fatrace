@@ -3,6 +3,7 @@
 Bug fixes:
  - More careful check of uninteresting mount points, only consider those with a
    '/' in it. Thanks Heinrich Schuchardt!
+ - power-usage-report: Fix output parsing for PowerTOP 2.5. (LP: #1265142)
 
 0.5 (2013-04-11)
 ----------------
