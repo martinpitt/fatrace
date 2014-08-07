@@ -17,6 +17,8 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#define _LARGEFILE64_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -334,7 +336,7 @@ main (int argc, char** argv)
 
     parse_args (argc, argv);
 
-    fan_fd = fanotify_init (0, 0);
+    fan_fd = fanotify_init (0, O_LARGEFILE);
     if (fan_fd < 0) {
         err = errno;
         fprintf (stderr, "Cannot initialize fanotify: %s\n", strerror (err));

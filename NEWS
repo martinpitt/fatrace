@@ -1,3 +1,8 @@
+0.7 (UNRELEASED)
+----------------
+ - Use O_LARGEFILE to fix "Value too large for defined data type" error with
+   large files on some platforms. (LP: #1161989)
+
 0.6 (2014-01-07)
 ----------------
 Bug fixes:
