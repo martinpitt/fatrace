@@ -35,6 +35,8 @@
 #include <sys/fanotify.h>
 #include <sys/time.h>
 
+#define BUFSIZE 256*1024
+
 /* command line options */
 static char* option_output = NULL;
 static long option_timeout = -1;
@@ -349,7 +351,7 @@ main (int argc, char** argv)
 
     /* allocate memory for fanotify */
     buffer = NULL;
-    err = posix_memalign (&buffer, 4096, 4096);
+    err = posix_memalign (&buffer, 4096, BUFSIZE);
     if (err != 0 || buffer == NULL) {
         fprintf(stderr, "Failed to allocate buffer: %s\n", strerror (err));
         exit(1);
@@ -395,7 +397,7 @@ main (int argc, char** argv)
 
     /* read all events in a loop */
     while (running) {
-        res = read (fan_fd, buffer, 4096);
+        res = read (fan_fd, buffer, BUFSIZE);
         if (res == 0) {
             fprintf (stderr, "No more fanotify event (EOF)\n");
             break;

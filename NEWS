@@ -2,6 +2,7 @@
 ----------------
  - Use O_LARGEFILE to fix "Value too large for defined data type" error with
    large files on some platforms. (LP: #1161989)
+ - Increase buffer size to 256 KiB. (LP: #1312095)
 
 0.6 (2014-01-07)
 ----------------
