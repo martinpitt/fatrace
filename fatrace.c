@@ -145,9 +145,9 @@ setup_fanotify(int fan_fd)
     int res;
     FILE* mounts;
     struct mntent* mount;
-    
+
     if (option_current_mount) {
-        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, 
+        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT,
                 FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_CLOSE |  FAN_ONDIR | FAN_EVENT_ON_CHILD,
                 AT_FDCWD, ".");
         if (res < 0) {
@@ -176,7 +176,7 @@ setup_fanotify(int fan_fd)
         }
 
         //printf("Adding watch for %s mount %s\n", mount->mnt_type, mount->mnt_dir);
-        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT, 
+        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT,
                 FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD,
                 AT_FDCWD, mount->mnt_dir);
         if (res < 0) {
@@ -368,7 +368,7 @@ main (int argc, char** argv)
     }
 
     /* setup signal handler to cleanly stop the program */
-    sa.sa_handler = signal_handler; 
+    sa.sa_handler = signal_handler;
     sigemptyset (&sa.sa_mask);
     sa.sa_flags = 0;
     if (sigaction (SIGINT, &sa, NULL) < 0) {
@@ -378,7 +378,7 @@ main (int argc, char** argv)
 
     /* set up --time alarm */
     if (option_timeout > 0) {
-        sa.sa_handler = signal_handler; 
+        sa.sa_handler = signal_handler;
         sigemptyset (&sa.sa_mask);
         sa.sa_flags = 0;
         if (sigaction (SIGALRM, &sa, NULL) < 0) {
@@ -425,5 +425,5 @@ main (int argc, char** argv)
     }
 
     return 0;
-} 
+}
 
