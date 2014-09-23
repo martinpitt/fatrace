@@ -1,3 +1,11 @@
+0.8 (UNRELEASED)
+----------------
+ - The previous O_LARGEFILE change to fix "Value too large for defined data
+   type" error was ineffective, as in userspace this value is 0 on the affected
+   platforms. Use the real numeric value to work around the problem for systems
+   which run an older kernel that does not yet have the real fix.
+   (LP: #1372873)
+
 0.7 (2014-08-07)
 ----------------
  - Use O_LARGEFILE to fix "Value too large for defined data type" error with
