@@ -1,4 +1,4 @@
-0.8 (UNRELEASED)
+0.8 (2014-09-23)
 ----------------
  - The previous O_LARGEFILE change to fix "Value too large for defined data
    type" error was ineffective, as in userspace this value is 0 on the affected
