@@ -166,7 +166,7 @@ def powertop_report(raw_out):
 
     for (search_header, print_header) in blocks:
         # skip until search_header
-        while i < len(lines) and not lines[i].lower().startswith('**' + search_header):
+        while i < len(lines) and not search_header in lines[i].lower():
             i += 1
         i += 1  # skip header
         # skip empty lines
@@ -174,7 +174,7 @@ def powertop_report(raw_out):
             i += 1
 
         print('====== %s ======' % print_header)
-        while i < len(lines) and lines[i]:
+        while i < len(lines) and lines[i] and not lines[i].startswith('_____'):
             print(lines[i])
             i += 1
         print('')
