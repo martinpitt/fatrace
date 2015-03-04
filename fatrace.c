@@ -45,6 +45,7 @@
 
 /* command line options */
 static char* option_output = NULL;
+static long option_filter_mask = 0;
 static long option_timeout = -1;
 static int option_current_mount = 0;
 static int option_timestamp = 0;
@@ -96,6 +97,10 @@ print_event(const struct fanotify_event_metadata *data,
     static char procname[100];
     static char pathname[PATH_MAX];
     struct stat st;
+
+    if ((data->mask & option_filter_mask) == 0) {
+        return;
+        }
 
     /* read process name */
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
@@ -212,6 +217,7 @@ help (void)
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
+"  -f MASK, --filter\tShow only the given event types (choose from C,R,O or W).\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -224,6 +230,7 @@ static void
 parse_args (int argc, char** argv)
 {
     int c;
+    int j;
     long pid;
     char *endptr;
 
@@ -233,12 +240,13 @@ parse_args (int argc, char** argv)
         {"seconds",       required_argument, 0, 's'},
         {"timestamp",     no_argument,       0, 't'},
         {"ignore-pid",    required_argument, 0, 'p'},
+        {"filter",        no_argument,       0, 'f'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "co:s:tp:h", long_options, NULL);
+        c = getopt_long (argc, argv, "co:s:tpf:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -250,6 +258,29 @@ parse_args (int argc, char** argv)
 
             case 'o':
                 option_output = strdup (optarg);
+                break;
+
+            case 'f':
+                j = 0;
+                while(optarg[j] != '\0') {
+                    switch( optarg[j] ) {
+                        case 'R':
+                            option_filter_mask |= FAN_ACCESS;
+                            break;
+                        case 'C':
+                            option_filter_mask |= FAN_CLOSE_WRITE;
+                            option_filter_mask |= FAN_CLOSE_NOWRITE;
+                            break;
+                        case 'W':
+                            option_filter_mask |= FAN_CLOSE_WRITE;
+                            option_filter_mask |= FAN_MODIFY;
+                            break;
+                        case 'O':
+                            option_filter_mask |= FAN_OPEN;
+                            break;
+                    }
+                    j++;
+                }
                 break;
 
             case 's':
