@@ -45,7 +45,7 @@
 
 /* command line options */
 static char* option_output = NULL;
-static long option_filter_mask = 0;
+static long option_filter_mask = 0xffffffff;
 static long option_timeout = -1;
 static int option_current_mount = 0;
 static int option_timestamp = 0;
@@ -262,6 +262,7 @@ parse_args (int argc, char** argv)
 
             case 'f':
                 j = 0;
+                option_filter_mask = 0x00000000;
                 while(optarg[j] != '\0') {
                     switch( optarg[j] ) {
                         case 'R':
