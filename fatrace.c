@@ -217,7 +217,7 @@ help (void)
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
-"  -f MASK, --filter\tShow only the given event types (choose from C,R,O or W).\n"
+"  -f MASK, --filter\t\tShow only the given event types (choose from C,R,O or W).\n"
 "  -h, --help\t\t\tShow help.");
 }
 
