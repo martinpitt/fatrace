@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <sys/fanotify.h>
 #include <sys/time.h>
+#include <ctype.h>
 
 #define BUFSIZE 256*1024
 
@@ -100,7 +101,7 @@ print_event(const struct fanotify_event_metadata *data,
 
     if ((data->mask & option_filter_mask) == 0) {
         return;
-        }
+    }
 
     /* read process name */
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
@@ -217,7 +218,7 @@ help (void)
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
-"  -f MASK, --filter\t\tShow only the given event types (choose from C,R,O or W).\n"
+"  -f MASK, --filter=MASK\tShow only the given event types (choose from C,R,O,or W).\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -240,7 +241,7 @@ parse_args (int argc, char** argv)
         {"seconds",       required_argument, 0, 's'},
         {"timestamp",     no_argument,       0, 't'},
         {"ignore-pid",    required_argument, 0, 'p'},
-        {"filter",        no_argument,       0, 'f'},
+        {"filter",        required_argument, 0, 'f'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
@@ -264,7 +265,7 @@ parse_args (int argc, char** argv)
                 j = 0;
                 option_filter_mask = 0x00000000;
                 while(optarg[j] != '\0') {
-                    switch( optarg[j] ) {
+                    switch(toupper(optarg[j])) {
                         case 'R':
                             option_filter_mask |= FAN_ACCESS;
                             break;
@@ -279,6 +280,8 @@ parse_args (int argc, char** argv)
                         case 'O':
                             option_filter_mask |= FAN_OPEN;
                             break;
+                        default:
+                            ; /* ignore unkown values for backwards compatibility */
                     }
                     j++;
                 }
