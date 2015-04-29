@@ -1,4 +1,4 @@
-0.10 (UNRELEASED)
+0.10 (2015-04-29)
 -----------------
  - Add --filter/-f option to only show selected event types. Thanks to Bryce
    Nesbitt!
