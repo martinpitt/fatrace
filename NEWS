@@ -1,3 +1,8 @@
+0.10 (UNRELEASED)
+-----------------
+ - Add --filter/-f option to only show selected event types. Thanks to Bryce
+   Nesbitt!
+
 0.9 (2014-11-07)
 ----------------
  - power-usage-report: Adjust parsing to also work for powertop 2.6.

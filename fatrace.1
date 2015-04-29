@@ -88,6 +88,18 @@ is printed as seconds/microseconds since the epoch.
 Ignore events for this process ID. Can be specified multiple times.
 
 .TP
+.B \-f \fITYPES\fR, \fB\-\-filter=\fITYPES
+Show only the given event types.
+.B TYPES
+is a list of
+.BR C ", " R ", " O ", or " W
+with the above meanings.
+
+E. g. use
+.B \--filter=OC
+to only show open and close events.
+
+.TP
 .B \-h \fR, \fB\-\-help
 Print help and exit.
 
