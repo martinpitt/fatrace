@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <unistd.h>
 #include <string.h>
 #include <fcntl.h>
@@ -34,6 +35,7 @@
 #include <sys/stat.h>
 #include <sys/fanotify.h>
 #include <sys/time.h>
+#include <sys/types.h>
 #include <ctype.h>
 
 #define BUFSIZE 256*1024

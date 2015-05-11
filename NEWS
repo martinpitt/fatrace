@@ -1,3 +1,7 @@
+0.10.1 (UNRELEASED)
+-------------------
+ - Make compatible with musl libc. Thanks Christian Neukirchen!
+
 0.10 (2015-04-29)
 -----------------
  - Add --filter/-f option to only show selected event types. Thanks to Bryce

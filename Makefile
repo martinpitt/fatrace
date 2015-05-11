@@ -1,10 +1,11 @@
 VERSION=$(shell head -n1 NEWS | cut -f1 -d' ')
 
 CFLAGS ?= -O2 -g -Wall -Wextra -Werror
+CDEFS = -D_GNU_SOURCE
 PREFIX ?= /usr/local
 
 fatrace: fatrace.o
-	$(CC) $(LDFLAGS) -o $@ $<
+	$(CC) $(CDEFS) $(LDFLAGS) -o $@ $<
 
 clean:
 	rm -f *.o fatrace
