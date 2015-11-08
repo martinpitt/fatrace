@@ -54,6 +54,7 @@ static int option_current_mount = 0;
 static int option_timestamp = 0;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
+static char* option_comm = NULL;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -121,6 +122,9 @@ print_event(const struct fanotify_event_metadata *data,
     }
     if (fd >= 0)
 	close (fd);
+
+    if (option_comm && strcmp (option_comm, procname) != 0)
+        return;
 
     /* try to figure out the path name */
     snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", data->fd);
@@ -220,6 +224,7 @@ help (void)
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, or W, e. g. --filter=OC.\n"
+"  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -243,17 +248,22 @@ parse_args (int argc, char** argv)
         {"timestamp",     no_argument,       0, 't'},
         {"ignore-pid",    required_argument, 0, 'p'},
         {"filter",        required_argument, 0, 'f'},
+        {"command",       required_argument, 0, 'C'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "co:s:tpf:h", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tpf:h", long_options, NULL);
 
         if (c == -1)
             break;
 
         switch (c) {
+            case 'C':
+                option_comm = strdup (optarg);
+                break;
+
             case 'c':
                 option_current_mount = 1;
                 break;
