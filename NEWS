@@ -1,4 +1,4 @@
-0.12 (UNRELEASED)
+0.12 (2016-04-25)
 -----------------
  - Fix crash introdued in 0.10 when using the -p option. Thanks Yuriy M.
    Kaminski! (Debian #817247, LP: #1563919)
