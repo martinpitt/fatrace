@@ -254,7 +254,7 @@ parse_args (int argc, char** argv)
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tpf:h", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tp:f:h", long_options, NULL);
 
         if (c == -1)
             break;

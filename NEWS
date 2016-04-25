@@ -1,3 +1,8 @@
+0.12 (UNRELEASED)
+-----------------
+ - Fix crash introdued in 0.10 when using the -p option. Thanks Yuriy M.
+   Kaminski! (Debian #817247, LP: #1563919)
+
 0.11 (2015-11-08)
 -----------------
  - Make compatible with musl libc. Thanks Christian Neukirchen!
