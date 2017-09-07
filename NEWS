@@ -1,3 +1,8 @@
+0.13 (UNRELEASED)
+-----------------
+ - Fix #include file for major() and minor() to avoid a warning with recent
+   glibc.
+
 0.12 (2016-04-25)
 -----------------
  - Fix crash introdued in 0.10 when using the -p option. Thanks Yuriy M.

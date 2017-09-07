@@ -35,7 +35,7 @@
 #include <sys/stat.h>
 #include <sys/fanotify.h>
 #include <sys/time.h>
-#include <sys/types.h>
+#include <sys/sysmacros.h>
 #include <ctype.h>
 
 #define BUFSIZE 256*1024
