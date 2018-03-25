@@ -1,4 +1,4 @@
-0.13 (UNRELEASED)
+0.13 (2018-03-25)
 -----------------
  - Fix #include file for major() and minor() to avoid a warning with recent
    glibc.
