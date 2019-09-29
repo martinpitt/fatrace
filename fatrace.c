@@ -40,12 +40,6 @@
 
 #define BUFSIZE 256*1024
 
-/* work around kernels which do not have this fix yet:
- * http://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=1e2ee49f7
- * O_LARGEFILE is usually 0, so hardcode it here
- */
-#define KERNEL_O_LARGEFILE 00100000
-
 /* command line options */
 static char* option_output = NULL;
 static long option_filter_mask = 0xffffffff;
@@ -391,7 +385,7 @@ main (int argc, char** argv)
 
     parse_args (argc, argv);
 
-    fan_fd = fanotify_init (0, KERNEL_O_LARGEFILE);
+    fan_fd = fanotify_init (0, O_LARGEFILE);
     if (fan_fd < 0) {
         err = errno;
         fprintf (stderr, "Cannot initialize fanotify: %s\n", strerror (err));
