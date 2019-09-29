@@ -127,10 +127,8 @@ print_event (const struct fanotify_event_metadata *data,
     len = readlink (printbuf, pathname, sizeof (pathname));
     if (len < 0) {
         /* fall back to the device/inode */
-        if (fstat (data->fd, &st) < 0) {
-            perror ("stat");
-            exit (1);
-        }
+        if (fstat (data->fd, &st) < 0)
+            err (EXIT_FAILURE, "stat");
         snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
     } else {
         pathname[len] = '\0';
@@ -160,7 +158,7 @@ do_mark (int fan_fd, const char *dir, bool fatal)
     if (res < 0)
     {
         if (fatal)
-            err (1, "Failed to add watch for %s", dir);
+            err (EXIT_FAILURE, "Failed to add watch for %s", dir);
         else
             warn ("Failed to add watch for %s", dir);
     }
@@ -187,10 +185,8 @@ setup_fanotify (int fan_fd)
 
     /* iterate over all mounts */
     mounts = setmntent ("/proc/self/mounts", "r");
-    if (mounts == NULL) {
-        perror ("setmntent");
-        exit (1);
-    }
+    if (mounts == NULL)
+        err (EXIT_FAILURE, "setmntent");
 
     while ((mount = getmntent (mounts)) != NULL) {
         /* Only consider mounts which have an actual device or bind mount
@@ -294,8 +290,7 @@ parse_args (int argc, char** argv)
                             option_filter_mask |= FAN_OPEN;
                             break;
                         default:
-                            fprintf (stderr, "Error: Unknown --filter type '%c'\n", optarg[j]);
-                            exit (1);
+                            errx (EXIT_FAILURE, "Error: Unknown --filter type '%c'", optarg[j]);
                     }
                     j++;
                 }
@@ -303,44 +298,35 @@ parse_args (int argc, char** argv)
 
             case 's':
                 option_timeout = strtol (optarg, &endptr, 10);
-                if (*endptr != '\0' || option_timeout <= 0) {
-                    fputs ("Error: Invalid number of seconds\n", stderr);
-                    exit (1);
-                }
+                if (*endptr != '\0' || option_timeout <= 0)
+                    errx (EXIT_FAILURE, "Error: Invalid number of seconds");
                 break;
 
             case 'p':
                 pid = strtol (optarg, &endptr, 10);
-                if (*endptr != '\0' || pid <= 0) {
-                    fputs ("Error: Invalid PID\n", stderr);
-                    exit (1);
-                }
+                if (*endptr != '\0' || pid <= 0)
+                    errx (EXIT_FAILURE, "Error: Invalid PID");
                 if (ignored_pids_len < sizeof (ignored_pids))
                     ignored_pids[ignored_pids_len++] = pid;
-                else {
-                    fputs ("Error: Too many ignored PIDs\n", stderr);
-                    exit (1);
-                }
+                else
+                    errx (EXIT_FAILURE, "Error: Too many ignored PIDs");
                 break;
 
             case 't':
-                if (++option_timestamp > 2) {
-                    fputs ("Error: --timestamp option can be given at most two times\n", stderr);
-                    exit (1);
-                };
+                if (++option_timestamp > 2)
+                    errx (EXIT_FAILURE, "Error: --timestamp option can be given at most two times");
                 break;
 
             case 'h':
                 help ();
-                exit (0);
+                exit (EXIT_SUCCESS);
 
             case '?':
                 /* getopt_long() already prints error message */
-                exit (1);
+                exit (EXIT_FAILURE);
 
             default:
-                fprintf (stderr, "Internal error: unexpected option '%c'\n", c);
-                exit (1);
+                errx (EXIT_FAILURE, "Internal error: unexpected option '%c'", c);
         }
     }
 }
@@ -374,7 +360,7 @@ signal_handler (int signal)
 
     /* but if stuck in some others functions, just quit now */
     if (signaled > 1)
-        _exit (1);
+        _exit (EXIT_FAILURE);
 }
 
 int
@@ -382,7 +368,6 @@ main (int argc, char** argv)
 {
     int fan_fd;
     int res;
-    int err;
     void *buffer;
     struct fanotify_event_metadata *data;
     struct sigaction sa;
@@ -395,30 +380,26 @@ main (int argc, char** argv)
 
     fan_fd = fanotify_init (0, O_LARGEFILE);
     if (fan_fd < 0) {
-        err = errno;
-        fprintf (stderr, "Cannot initialize fanotify: %s\n", strerror (err));
-        if (err == EPERM)
+        int e = errno;
+        perror ("Cannot initialize fanotify");
+        if (e == EPERM)
             fputs ("You need to run this program as root.\n", stderr);
-        exit (1);
+        exit (EXIT_FAILURE);
     }
 
     setup_fanotify (fan_fd);
 
     /* allocate memory for fanotify */
     buffer = NULL;
-    err = posix_memalign (&buffer, 4096, BUFSIZE);
-    if (err != 0 || buffer == NULL) {
-        fprintf (stderr, "Failed to allocate buffer: %s\n", strerror (err));
-        exit (1);
-    }
+    res = posix_memalign (&buffer, 4096, BUFSIZE);
+    if (res != 0 || buffer == NULL)
+        err (EXIT_FAILURE, "Failed to allocate buffer");
 
     /* output file? */
     if (option_output) {
         int fd = open (option_output, O_CREAT|O_WRONLY|O_EXCL, 0666);
-        if (fd < 0) {
-            perror ("Failed to open output file");
-            exit (1);
-        }
+        if (fd < 0)
+            err (EXIT_FAILURE, "Failed to open output file");
         fflush (stdout);
         dup2 (fd, STDOUT_FILENO);
         close (fd);
@@ -428,20 +409,16 @@ main (int argc, char** argv)
     sa.sa_handler = signal_handler;
     sigemptyset (&sa.sa_mask);
     sa.sa_flags = 0;
-    if (sigaction (SIGINT, &sa, NULL) < 0) {
-        perror ("sigaction");
-        exit (1);
-    }
+    if (sigaction (SIGINT, &sa, NULL) < 0)
+        err (EXIT_FAILURE, "sigaction");
 
     /* set up --time alarm */
     if (option_timeout > 0) {
         sa.sa_handler = signal_handler;
         sigemptyset (&sa.sa_mask);
         sa.sa_flags = 0;
-        if (sigaction (SIGALRM, &sa, NULL) < 0) {
-            perror ("sigaction");
-            exit (1);
-        }
+        if (sigaction (SIGALRM, &sa, NULL) < 0)
+            err (EXIT_FAILURE, "sigaction");
         alarm (option_timeout);
     }
 
@@ -460,16 +437,13 @@ main (int argc, char** argv)
         if (res < 0) {
             if (errno == EINTR)
                 continue;
-            perror ("read");
-            exit (1);
+            errx (EXIT_FAILURE, "read");
         }
 
         /* get event time, if requested */
         if (option_timestamp) {
-            if (gettimeofday (&event_time, NULL) < 0) {
-                perror ("gettimeofday");
-                exit (1);
-            }
+            if (gettimeofday (&event_time, NULL) < 0)
+                err (EXIT_FAILURE, "gettimeofday");
         }
 
         data = (struct fanotify_event_metadata *) buffer;
