@@ -88,8 +88,8 @@ mask2str (uint64_t mask)
  * Print data from fanotify_event_metadata struct to stdout.
  */
 static void
-print_event(const struct fanotify_event_metadata *data,
-            const struct timeval *event_time)
+print_event (const struct fanotify_event_metadata *data,
+             const struct timeval *event_time)
 {
     int fd;
     ssize_t len;
@@ -147,7 +147,7 @@ print_event(const struct fanotify_event_metadata *data,
 }
 
 static void
-do_mark(int fan_fd, const char *dir, bool fatal)
+do_mark (int fan_fd, const char *dir, bool fatal)
 {
     int res;
 
@@ -156,12 +156,13 @@ do_mark(int fan_fd, const char *dir, bool fatal)
             FAN_MARK_ADD | FAN_MARK_MOUNT,
             FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE |  FAN_ONDIR | FAN_EVENT_ON_CHILD,
             AT_FDCWD, dir);
+
     if (res < 0)
     {
         if (fatal)
-            err(1, "Failed to add watch for %s", dir);
+            err (1, "Failed to add watch for %s", dir);
         else
-            warn("Failed to add watch for %s", dir);
+            warn ("Failed to add watch for %s", dir);
     }
 }
 
@@ -174,13 +175,13 @@ do_mark(int fan_fd, const char *dir, bool fatal)
  * mount if --current-mount is given.
  */
 static void
-setup_fanotify(int fan_fd)
+setup_fanotify (int fan_fd)
 {
     FILE* mounts;
     struct mntent* mount;
 
     if (option_current_mount) {
-        do_mark(fan_fd, ".", true);
+        do_mark (fan_fd, ".", true);
         return;
     }
 
@@ -196,13 +197,13 @@ setup_fanotify(int fan_fd)
          * point. The others are stuff like proc, sysfs, binfmt_misc etc. which
          * are virtual and do not actually cause disk access. */
         if (mount->mnt_fsname == NULL || access (mount->mnt_fsname, F_OK) != 0 ||
-            strchr(mount->mnt_fsname, '/') == NULL) {
-            //printf("IGNORE: fsname: %s dir: %s type: %s\n", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type);
+            strchr (mount->mnt_fsname, '/') == NULL) {
+            /* printf ("IGNORE: fsname: %s dir: %s type: %s\n", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type); */
             continue;
         }
 
-        //printf("Adding watch for %s mount %s\n", mount->mnt_type, mount->mnt_dir);
-        do_mark(fan_fd, mount->mnt_dir, false);
+        //printf ("Adding watch for %s mount %s\n", mount->mnt_type, mount->mnt_dir);
+        do_mark (fan_fd, mount->mnt_dir, false);
     }
 
     endmntent (mounts);
@@ -373,7 +374,7 @@ signal_handler (int signal)
 
     /* but if stuck in some others functions, just quit now */
     if (signaled > 1)
-        _exit(1);
+        _exit (1);
 }
 
 int
@@ -388,7 +389,7 @@ main (int argc, char** argv)
     struct timeval event_time;
 
     /* always ignore events from ourselves (writing log file) */
-    ignored_pids[ignored_pids_len++] = getpid();
+    ignored_pids[ignored_pids_len++] = getpid ();
 
     parse_args (argc, argv);
 
@@ -398,7 +399,7 @@ main (int argc, char** argv)
         fprintf (stderr, "Cannot initialize fanotify: %s\n", strerror (err));
         if (err == EPERM)
             fputs ("You need to run this program as root.\n", stderr);
-        exit(1);
+        exit (1);
     }
 
     setup_fanotify (fan_fd);
@@ -407,8 +408,8 @@ main (int argc, char** argv)
     buffer = NULL;
     err = posix_memalign (&buffer, 4096, BUFSIZE);
     if (err != 0 || buffer == NULL) {
-        fprintf(stderr, "Failed to allocate buffer: %s\n", strerror (err));
-        exit(1);
+        fprintf (stderr, "Failed to allocate buffer: %s\n", strerror (err));
+        exit (1);
     }
 
     /* output file? */
@@ -446,7 +447,7 @@ main (int argc, char** argv)
 
     /* clear event time if timestamp is not required */
     if (!option_timestamp) {
-        memset(&event_time, 0, sizeof(struct timeval));
+        memset (&event_time, 0, sizeof (struct timeval));
     }
 
     /* read all events in a loop */
@@ -460,7 +461,7 @@ main (int argc, char** argv)
             if (errno == EINTR)
                 continue;
             perror ("read");
-            exit(1);
+            exit (1);
         }
 
         /* get event time, if requested */
