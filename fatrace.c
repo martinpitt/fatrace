@@ -63,6 +63,13 @@ static char* option_comm = NULL;
 static volatile int running = 1;
 static volatile int signaled = 0;
 
+/* FAN_MARK_FILESYSTEM got introduced in Linux 4.20; do_mark falls back to _MOUNT */
+#ifdef FAN_MARK_FILESYSTEM
+static int mark_mode = FAN_MARK_ADD | FAN_MARK_FILESYSTEM;
+#else
+static int mark_mode = FAN_MARK_ADD | FAN_MARK_MOUNT;
+#endif
+
 /**
  * mask2str:
  *
@@ -179,9 +186,20 @@ do_mark (int fan_fd, const char *dir, bool fatal)
 
     res = fanotify_mark (
             fan_fd,
-            FAN_MARK_ADD | FAN_MARK_MOUNT,
+            mark_mode,
             FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE |  FAN_ONDIR | FAN_EVENT_ON_CHILD,
             AT_FDCWD, dir);
+
+#ifdef FAN_MARK_FILESYSTEM
+    /* fallback for Linux < 4.20 */
+    if (res < 0 && errno == EINVAL && mark_mode & FAN_MARK_FILESYSTEM)
+    {
+        debug ("FAN_MARK_FILESYSTEM not supported; falling back to FAN_MARK_MOUNT");
+        mark_mode = FAN_MARK_ADD | FAN_MARK_MOUNT;
+        do_mark (fan_fd, dir, fatal);
+        return;
+    }
+#endif
 
     if (res < 0)
     {
