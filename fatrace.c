@@ -474,6 +474,8 @@ main (int argc, char** argv)
 
         data = (struct fanotify_event_metadata *) buffer;
         while (FAN_EVENT_OK (data, res)) {
+            if (data->vers != FANOTIFY_METADATA_VERSION)
+                errx (EXIT_FAILURE, "Mismatch of fanotify metadata version");
             if (show_pid (data->pid))
                 print_event (data, &event_time);
             close (data->fd);
