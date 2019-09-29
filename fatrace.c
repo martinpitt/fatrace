@@ -21,6 +21,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <unistd.h>
 #include <string.h>
@@ -29,6 +30,7 @@
 #include <dirent.h>
 #include <mntent.h>
 #include <getopt.h>
+#include <err.h>
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
@@ -144,8 +146,27 @@ print_event(const struct fanotify_event_metadata *data,
     printf ("%s(%i): %s %s\n", procname, data->pid, mask2str (data->mask), pathname);
 }
 
+static void
+do_mark(int fan_fd, const char *dir, bool fatal)
+{
+    int res;
+
+    res = fanotify_mark (
+            fan_fd,
+            FAN_MARK_ADD | FAN_MARK_MOUNT,
+            FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE |  FAN_ONDIR | FAN_EVENT_ON_CHILD,
+            AT_FDCWD, dir);
+    if (res < 0)
+    {
+        if (fatal)
+            err(1, "Failed to add watch for %s", dir);
+        else
+            warn("Failed to add watch for %s", dir);
+    }
+}
+
 /**
- * fanotify_mark_mounts:
+ * setup_fanotify:
  *
  * @fan_fd: fanotify file descriptor as returned by fanotify_init().
  *
@@ -155,19 +176,11 @@ print_event(const struct fanotify_event_metadata *data,
 static void
 setup_fanotify(int fan_fd)
 {
-    int res;
     FILE* mounts;
     struct mntent* mount;
 
     if (option_current_mount) {
-        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT,
-                FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_CLOSE |  FAN_ONDIR | FAN_EVENT_ON_CHILD,
-                AT_FDCWD, ".");
-        if (res < 0) {
-            fprintf(stderr, "Failed to add watch for current directory: %s\n", strerror (errno));
-            exit (1);
-        }
-
+        do_mark(fan_fd, ".", true);
         return;
     }
 
@@ -189,13 +202,7 @@ setup_fanotify(int fan_fd)
         }
 
         //printf("Adding watch for %s mount %s\n", mount->mnt_type, mount->mnt_dir);
-        res = fanotify_mark (fan_fd, FAN_MARK_ADD | FAN_MARK_MOUNT,
-                FAN_ACCESS| FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD,
-                AT_FDCWD, mount->mnt_dir);
-        if (res < 0) {
-            fprintf(stderr, "Failed to add watch for %s mount %s: %s\n",
-                    mount->mnt_type, mount->mnt_dir, strerror (errno));
-        }
+        do_mark(fan_fd, mount->mnt_dir, false);
     }
 
     endmntent (mounts);
