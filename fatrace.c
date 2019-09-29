@@ -91,7 +91,7 @@ static void
 print_event (const struct fanotify_event_metadata *data,
              const struct timeval *event_time)
 {
-    int fd;
+    int proc_fd;
     ssize_t len;
     static char printbuf[100];
     static char procname[100];
@@ -104,9 +104,9 @@ print_event (const struct fanotify_event_metadata *data,
     /* read process name */
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
     len = 0;
-    fd = open (printbuf, O_RDONLY);
-    if (fd >= 0) {
-        len = read (fd, procname, sizeof (procname));
+    proc_fd = open (printbuf, O_RDONLY);
+    if (proc_fd >= 0) {
+        len = read (proc_fd, procname, sizeof (procname));
         while (len > 0 && procname[len-1] == '\n') {
             len--;
         }
@@ -116,8 +116,8 @@ print_event (const struct fanotify_event_metadata *data,
     } else {
         strcpy (procname, "unknown");
     }
-    if (fd >= 0)
-	close (fd);
+    if (proc_fd >= 0)
+	close (proc_fd);
 
     if (option_comm && strcmp (option_comm, procname) != 0)
         return;
