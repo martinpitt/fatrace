@@ -161,7 +161,7 @@ def powertop_report(raw_out):
     ]
 
     # filter out multiple empty lines
-    lines = re.sub('\n{3,}', '\n\n', raw_out, re.S).splitlines()
+    lines = re.sub('\n{3,}', '\n\n', raw_out).splitlines()
     i = 0
 
     for (search_header, print_header) in blocks:
