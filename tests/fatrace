@@ -1,0 +1,29 @@
+#!/bin/sh
+set -euC
+
+LOG=$AUTOPKGTEST_TMP/fatrace.log
+echo "starting fatrace..."
+fatrace -s 2 -o $LOG &
+sleep 1
+
+echo "read a file..."
+head /etc/passwd > /dev/null
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+check_log() {
+    if ! grep -q "$1" $LOG; then
+        echo "$1 not found in log:" >&2
+        echo "===================" >&2
+        cat $LOG >&2
+        echo "===================" >&2
+        exit 1
+    fi
+}
+
+# accessing the "head" binary
+check_log "RC\?O\? /usr/bin/head$"
+# head accessing /etc/passwd
+check_log "RC\?O\? /etc/passwd$"
