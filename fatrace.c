@@ -42,6 +42,13 @@
 
 #define BUFSIZE 256*1024
 
+#define DEBUG 0
+#if DEBUG
+#define debug(fmt, ...) fprintf (stderr, "DEBUG: " fmt "\n", ##__VA_ARGS__)
+#else
+#define debug(...) {}
+#endif
+
 /* command line options */
 static char* option_output = NULL;
 static long option_filter_mask = 0xffffffff;
@@ -194,11 +201,11 @@ setup_fanotify (int fan_fd)
          * are virtual and do not actually cause disk access. */
         if (mount->mnt_fsname == NULL || access (mount->mnt_fsname, F_OK) != 0 ||
             strchr (mount->mnt_fsname, '/') == NULL) {
-            /* printf ("IGNORE: fsname: %s dir: %s type: %s\n", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type); */
+            debug ("ignore: fsname: %s dir: %s type: %s", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type);
             continue;
         }
 
-        //printf ("Adding watch for %s mount %s\n", mount->mnt_type, mount->mnt_dir);
+        debug ("add watch for %s mount %s", mount->mnt_type, mount->mnt_dir);
         do_mark (fan_fd, mount->mnt_dir, false);
     }
 
