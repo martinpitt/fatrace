@@ -35,9 +35,11 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/statfs.h>
 #include <sys/fanotify.h>
 #include <sys/time.h>
 #include <sys/sysmacros.h>
+#include <sys/types.h>
 #include <ctype.h>
 
 #define BUFSIZE 256*1024
@@ -69,6 +71,96 @@ static int mark_mode = FAN_MARK_ADD | FAN_MARK_FILESYSTEM;
 #else
 static int mark_mode = FAN_MARK_ADD | FAN_MARK_MOUNT;
 #endif
+
+/* FAN_REPORT_FID mode got introduced in Linux 5.1 */
+#ifdef FAN_REPORT_FID
+static int fid_mode;
+
+/* fsid → mount fd map */
+
+#define MAX_MOUNTS 100
+static struct {
+    fsid_t fsid;
+    int mount_fd;
+} fsids[MAX_MOUNTS];
+static size_t fsids_len;
+
+/**
+ * add_fsid:
+ *
+ * Add fsid → mount fd map entry for a particular mount point
+ */
+static void
+add_fsid (const char* mount_point)
+{
+    struct statfs s;
+    int fd;
+
+    if (fsids_len == MAX_MOUNTS) {
+        warnx ("Too many mounts, not resolving fd paths for %s", mount_point);
+        return;
+    }
+
+    fd = open (mount_point, O_RDONLY | O_NOFOLLOW);
+    if (fd < 0) {
+        warn ("Failed to open mount point %s", mount_point);
+        return;
+    }
+
+    if (fstatfs (fd, &s) < 0) {
+        warn ("Failed to stat mount point %s", mount_point);
+        close (fd);
+        return;
+    }
+
+    memcpy (&fsids[fsids_len].fsid, &s.f_fsid, sizeof (s.f_fsid));
+    fsids[fsids_len++].mount_fd = fd;
+    debug ("mount %s fd %i", mount_point, fd);
+}
+
+static int
+get_mount_id (const fsid_t *fsid)
+{
+    for (size_t i = 0; i < fsids_len; ++i) {
+        if (memcmp (fsid, &fsids[i].fsid, sizeof (fsids[i].fsid)) == 0) {
+            debug ("mapped fsid to fd %i", fsids[i].mount_fd);
+            return fsids[i].mount_fd;
+        }
+    }
+
+    debug ("fsid not found, default to AT_FDCWD\n");
+    return AT_FDCWD;
+}
+
+/**
+ * get_fid_event_fd:
+ *
+ * In FAN_REPORT_FID mode, return an fd for the event's target.
+ */
+static int
+get_fid_event_fd (const struct fanotify_event_metadata *data)
+{
+    const struct fanotify_event_info_fid *fid = (const struct fanotify_event_info_fid *) (data + 1);
+    int fd;
+
+    if (fid->hdr.info_type != FAN_EVENT_INFO_TYPE_FID)
+        errx (EXIT_FAILURE, "Received unexpected event info type %i", fid->hdr.info_type);
+
+    /* get affected file fd from fanotify_event_info_fid */
+    fd = open_by_handle_at (get_mount_id ((const fsid_t *) &fid->fsid),
+                            (struct file_handle *) fid->handle, O_RDONLY);
+    /* ignore ESTALE for deleted fds between the notification and handling it */
+    if (fd < 0 && errno != ESTALE)
+        err (EXIT_FAILURE, "open_by_handle_at");
+
+    return fd;
+}
+
+#else /* defined(FAN_REPORT_FID) */
+
+#define add_fsid(...)
+
+#endif /* defined(FAN_REPORT_FID) */
 
 /**
  * mask2str:
@@ -154,6 +246,11 @@ print_event (const struct fanotify_event_metadata *data,
     if (option_comm && strcmp (option_comm, procname) != 0)
         return;
 
+#ifdef FAN_REPORT_FID
+    if (fid_mode)
+        event_fd = get_fid_event_fd (data);
+#endif
+
     if (event_fd >= 0) {
         /* try to figure out the path name */
         snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", event_fd);
@@ -232,7 +329,11 @@ setup_fanotify (int fan_fd)
         return;
     }
 
-    /* iterate over all mounts */
+    /* iterate over all mounts; explicitly start with the root dir, to get
+     * the shortest possible paths on fsid resolution on e. g. OSTree */
+    do_mark (fan_fd, "/", false);
+    add_fsid ("/");
+
     mounts = setmntent ("/proc/self/mounts", "r");
     if (mounts == NULL)
         err (EXIT_FAILURE, "setmntent");
@@ -247,8 +348,13 @@ setup_fanotify (int fan_fd)
             continue;
         }
 
+        /* root dir already added above */
+        if (strcmp (mount->mnt_dir, "/") == 0)
+            continue;
+
         debug ("add watch for %s mount %s", mount->mnt_type, mount->mnt_dir);
         do_mark (fan_fd, mount->mnt_dir, false);
+        add_fsid (mount->mnt_dir);
     }
 
     endmntent (mounts);
@@ -397,7 +503,7 @@ signal_handler (int signal)
 int
 main (int argc, char** argv)
 {
-    int fan_fd;
+    int fan_fd = -1;
     int res;
     void *buffer;
     struct fanotify_event_metadata *data;
@@ -409,7 +515,17 @@ main (int argc, char** argv)
 
     parse_args (argc, argv);
 
-    fan_fd = fanotify_init (0, O_LARGEFILE);
+#ifdef FAN_REPORT_FID
+    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID, O_LARGEFILE);
+    if (fan_fd >= 0)
+        fid_mode = 1;
+
+    if (fan_fd < 0 && errno == EINVAL)
+        debug ("FAN_REPORT_FID not available");
+#endif
+    if (fan_fd < 0)
+        fan_fd = fanotify_init (0, O_LARGEFILE);
+
     if (fan_fd < 0) {
         int e = errno;
         perror ("Cannot initialize fanotify");
