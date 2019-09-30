@@ -124,6 +124,7 @@ print_event (const struct fanotify_event_metadata *data,
              const struct timeval *event_time)
 {
     int proc_fd;
+    int event_fd = data->fd;
     ssize_t len;
     static char printbuf[100];
     static char procname[100];
@@ -153,18 +154,20 @@ print_event (const struct fanotify_event_metadata *data,
     if (option_comm && strcmp (option_comm, procname) != 0)
         return;
 
-    if (data->fd >= 0) {
+    if (event_fd >= 0) {
         /* try to figure out the path name */
-        snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", data->fd);
+        snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", event_fd);
         len = readlink (printbuf, pathname, sizeof (pathname));
         if (len < 0) {
             /* fall back to the device/inode */
-            if (fstat (data->fd, &st) < 0)
+            if (fstat (event_fd, &st) < 0)
                 err (EXIT_FAILURE, "stat");
             snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
         } else {
             pathname[len] = '\0';
         }
+
+        close (event_fd);
     } else {
         snprintf (pathname, sizeof (pathname), "(deleted)");
     }
@@ -479,8 +482,6 @@ main (int argc, char** argv)
             if (data->vers != FANOTIFY_METADATA_VERSION)
                 errx (EXIT_FAILURE, "Mismatch of fanotify metadata version");
             print_event (data, &event_time);
-            if (data->fd != FAN_NOFD)
-                close (data->fd);
             data = FAN_EVENT_NEXT (data, res);
         }
     }
