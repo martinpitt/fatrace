@@ -14,7 +14,7 @@ fatrace \- report system wide file access events
 .SH DESCRIPTION
 
 .B fatrace
-reports file access events from all running processes. 
+reports file access events from all running processes.
 
 It does not report file access by fatrace itself, to avoid logging events
 caused by writing the output into a file. It also ignores events on virtual and
@@ -47,8 +47,10 @@ long process names.
 Process ID
 
 .IP \(bu 2
-Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, or \fBC\fRlose. Combinations
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose, or \fBD\fRelete. Combinations
 are possible, such as \fBCW\fR for closing a written file.
+
+Delete events can only be detected on Linux 5.1 or higher.
 
 .IP \(bu 2
 Affected file. In some cases the path and name cannot be determined, e. g.
@@ -60,7 +62,7 @@ such a process in more detail, you should consider using
 .RE
 If you specify the
 .B \-\-timestamp
-option, the first field will be the current time. 
+option, the first field will be the current time.
 
 .SH OPTIONS
 
@@ -92,7 +94,7 @@ Ignore events for this process ID. Can be specified multiple times.
 Show only the given event types.
 .B TYPES
 is a list of
-.BR C ", " R ", " O ", or " W
+.BR C ", " R ", " O ", " W ", or " D
 with the above meanings.
 
 E. g. use

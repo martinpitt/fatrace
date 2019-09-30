@@ -183,6 +183,8 @@ mask2str (uint64_t mask)
         buffer[offset++] = 'W';
     if (mask & FAN_OPEN)
         buffer[offset++] = 'O';
+    if (mask & FAN_DELETE)
+        buffer[offset++] = 'D';
     buffer[offset] = '\0';
 
     return buffer;
@@ -287,7 +289,7 @@ do_mark (int fan_fd, const char *dir, bool fatal)
     res = fanotify_mark (
             fan_fd,
             mark_mode,
-            FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE |  FAN_ONDIR | FAN_EVENT_ON_CHILD,
+            FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_DELETE | FAN_ONDIR | FAN_EVENT_ON_CHILD,
             AT_FDCWD, dir);
 
 #ifdef FAN_MARK_FILESYSTEM
@@ -443,6 +445,9 @@ parse_args (int argc, char** argv)
                             break;
                         case 'O':
                             option_filter_mask |= FAN_OPEN;
+                            break;
+                        case 'D':
+                            option_filter_mask |= FAN_DELETE;
                             break;
                         default:
                             errx (EXIT_FAILURE, "Error: Unknown --filter type '%c'", optarg[j]);

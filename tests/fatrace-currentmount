@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 set -euC
 
 LOG="$AUTOPKGTEST_TMP/fatrace.log"
@@ -38,3 +38,11 @@ TEST_FILE=$(realpath "$TEST_FILE")
 check_log "^touch.* C\?W\?O $TEST_FILE"
 check_log "^touch.* C\?WO\? $TEST_FILE"
 check_log "^bash(.* C\?WO\? $TEST_FILE"
+
+# FAN_REPORT_FID support since Linux 5.3
+if [[ $(uname -r | cut -f1,2 -d.) > 5.2 ]]; then
+    # file deletion
+    check_log "^rm(.*): D $(dirname $TEST_FILE)"
+else
+    echo "skipping FAN_REPORT_FID tests, not available on this kernel"
+fi
