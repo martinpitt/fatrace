@@ -1,13 +1,22 @@
 #!/bin/sh
 set -euC
 
-LOG=$AUTOPKGTEST_TMP/fatrace.log
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
 echo "starting fatrace..."
 fatrace -s 2 -o $LOG &
 sleep 1
 
 echo "read a file..."
 head /etc/passwd > /dev/null
+
+echo "create a file..."
+# needs to be on an actual disk (not tmpfs), but writable everywhere
+TEST_FILE=/etc/test.txt
+touch "$TEST_FILE"
+set +C
+bash -c "echo hello > '$TEST_FILE'"
+set -C
+rm "$TEST_FILE"
 
 echo "waiting for fatrace..."
 wait
@@ -27,3 +36,7 @@ check_log() {
 check_log "RC\?O\? /usr/bin/head$"
 # head accessing /etc/passwd
 check_log "RC\?O\? /etc/passwd$"
+# file creation
+check_log "^touch.* C\?W\?O $TEST_FILE"
+check_log "^touch.* C\?WO\? $TEST_FILE"
+check_log "^bash(.* C\?WO\? $TEST_FILE"

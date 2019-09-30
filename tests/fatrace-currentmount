@@ -1,13 +1,21 @@
 #!/bin/sh
 set -euC
 
-LOG=${AUTOPKGTEST_TMP:-/tmp}/fatrace.log
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
 echo "starting fatrace..."
 fatrace --current-mount -s 2 -o $LOG &
 sleep 1
 
 echo "read a file..."
 head NEWS > /dev/null
+
+echo "create a file..."
+TEST_FILE=test.txt
+touch "$TEST_FILE"
+set +C
+bash -c "echo hello > '$TEST_FILE'"
+set -C
+rm "$TEST_FILE"
 
 echo "waiting for fatrace..."
 wait
@@ -25,3 +33,8 @@ check_log() {
 
 # accessing the NEWS file
 check_log "RC\?O\? $(pwd)/NEWS$"
+# file creation
+TEST_FILE=$(realpath "$TEST_FILE")
+check_log "^touch.* C\?W\?O $TEST_FILE"
+check_log "^touch.* C\?WO\? $TEST_FILE"
+check_log "^bash(.* C\?WO\? $TEST_FILE"
