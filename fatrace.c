@@ -118,13 +118,12 @@ print_event (const struct fanotify_event_metadata *data,
             len--;
         }
     }
-    if (len > 0) {
-	procname[len] = '\0';
-    } else {
+    if (len > 0)
+        procname[len] = '\0';
+    else
         strcpy (procname, "unknown");
-    }
     if (proc_fd >= 0)
-	close (proc_fd);
+        close (proc_fd);
 
     if (option_comm && strcmp (option_comm, procname) != 0)
         return;
