@@ -183,6 +183,7 @@ mask2str (uint64_t mask)
         buffer[offset++] = 'W';
     if (mask & FAN_OPEN)
         buffer[offset++] = 'O';
+#ifdef FAN_REPORT_FID
     if (mask & FAN_CREATE)
         buffer[offset++] = '+';
     if (mask & FAN_DELETE)
@@ -191,6 +192,7 @@ mask2str (uint64_t mask)
         buffer[offset++] = '<';
     if (mask & FAN_MOVED_TO)
         buffer[offset++] = '>';
+#endif
     buffer[offset] = '\0';
 
     return buffer;
@@ -291,12 +293,14 @@ static void
 do_mark (int fan_fd, const char *dir, bool fatal)
 {
     int res;
+    uint64_t mask = FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD;
 
-    res = fanotify_mark (
-            fan_fd,
-            mark_mode,
-            FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_CREATE | FAN_DELETE | FAN_MOVE | FAN_ONDIR | FAN_EVENT_ON_CHILD,
-            AT_FDCWD, dir);
+#ifdef FAN_REPORT_FID
+    if (fid_mode)
+        mask |= FAN_CREATE | FAN_DELETE | FAN_MOVE;
+#endif
+
+    res = fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir);
 
 #ifdef FAN_MARK_FILESYSTEM
     /* fallback for Linux < 4.20 */
@@ -452,6 +456,7 @@ parse_args (int argc, char** argv)
                         case 'O':
                             option_filter_mask |= FAN_OPEN;
                             break;
+#ifdef FAN_REPORT_FID
                         case '+':
                             option_filter_mask |= FAN_CREATE;
                             break;
@@ -462,6 +467,7 @@ parse_args (int argc, char** argv)
                         case '>':
                             option_filter_mask |= FAN_MOVE;
                             break;
+#endif
                         default:
                             errx (EXIT_FAILURE, "Error: Unknown --filter type '%c'", optarg[j]);
                     }
