@@ -47,10 +47,12 @@ long process names.
 Process ID
 
 .IP \(bu 2
-Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose, or \fBD\fRelete. Combinations
-are possible, such as \fBCW\fR for closing a written file.
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
+directories are \fBD\fRelete, \fB<\fR (moved from), or \fB>\fR (moved to).
+Combinations are possible, such as \fBCW\fR for closing a written file, or <>
+for renaming a file within the same directory.
 
-Delete events can only be detected on Linux 5.1 or higher.
+Directory events can only be detected on Linux 5.1 or higher.
 
 .IP \(bu 2
 Affected file. In some cases the path and name cannot be determined, e. g.
@@ -94,8 +96,9 @@ Ignore events for this process ID. Can be specified multiple times.
 Show only the given event types.
 .B TYPES
 is a list of
-.BR C ", " R ", " O ", " W ", or " D
-with the above meanings.
+.BR C ", " R ", " O ", " W ", " D ", or " <
+with the above meanings. < and > both mean "move" and will always enable both
+directions.
 
 E. g. use
 .B \--filter=OC

@@ -17,6 +17,14 @@ bash -c "echo hello > '$TEST_FILE'"
 set -C
 rm "$TEST_FILE"
 
+echo "moving a file within the same directory"
+touch "$TEST_FILE"
+mv "$TEST_FILE" "${TEST_FILE}.2"
+mkdir dest
+mv "${TEST_FILE}.2" dest/"${TEST_FILE}.2"
+rm dest/"${TEST_FILE}.2"
+rmdir dest
+
 echo "waiting for fatrace..."
 wait
 
@@ -42,7 +50,14 @@ check_log "^bash(.* C\?WO\? $TEST_FILE"
 # FAN_REPORT_FID support since Linux 5.3
 if [[ $(uname -r | cut -f1,2 -d.) > 5.2 ]]; then
     # file deletion
-    check_log "^rm(.*): D $(dirname $TEST_FILE)"
+    check_log "^rm(.*): D $(dirname $TEST_FILE)$"
+
+    # file renaming
+    check_log "^mv(.*): <> $(dirname $TEST_FILE)"
+
+    # file moving
+    check_log "^mv(.*): < $(dirname $TEST_FILE)$"
+    check_log "^mv(.*): > $(dirname $TEST_FILE)/dest$"
 else
     echo "skipping FAN_REPORT_FID tests, not available on this kernel"
 fi
