@@ -48,7 +48,8 @@ Process ID
 
 .IP \(bu 2
 Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
-directories are \fBD\fRelete, \fB<\fR (moved from), or \fB>\fR (moved to).
+directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
+or \fB>\fR (moved to).
 Combinations are possible, such as \fBCW\fR for closing a written file, or <>
 for renaming a file within the same directory.
 
@@ -96,7 +97,7 @@ Ignore events for this process ID. Can be specified multiple times.
 Show only the given event types.
 .B TYPES
 is a list of
-.BR C ", " R ", " O ", " W ", " D ", or " <
+.BR C ", " R ", " O ", " W ", " D ", " + ", or " <
 with the above meanings. < and > both mean "move" and will always enable both
 directions.
 

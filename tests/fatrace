@@ -43,6 +43,9 @@ check_log "^bash(.* C\?WO\? $TEST_FILE"
 
 # FAN_REPORT_FID support since Linux 5.3
 if [[ $(uname -r | cut -f1,2 -d.) > 5.2 ]]; then
+    # file creation
+    check_log "^touch(.*): + $(dirname $TEST_FILE)$"
+
     # file deletion
     check_log "^rm(.*): D $(dirname $TEST_FILE)"
 else

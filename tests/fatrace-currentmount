@@ -52,6 +52,10 @@ if [[ $(uname -r | cut -f1,2 -d.) > 5.2 ]]; then
     # file deletion
     check_log "^rm(.*): D $(dirname $TEST_FILE)$"
 
+    # dir creation
+    check_log "^touch(.*): + $(dirname $TEST_FILE)$"
+    check_log "^mkdir(.*): + $(dirname $TEST_FILE)$"
+
     # file renaming
     check_log "^mv(.*): <> $(dirname $TEST_FILE)"
 
