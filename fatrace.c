@@ -90,6 +90,24 @@ mask2str (uint64_t mask)
 }
 
 /**
+ * show_pid:
+ *
+ * Check if events for given PID should be logged.
+ *
+ * Returns: true if PID is to be logged, false if not.
+ */
+static bool
+show_pid (pid_t pid)
+{
+    unsigned int i;
+    for (i = 0; i < ignored_pids_len; ++i)
+        if (pid == ignored_pids[i])
+            return false;
+
+    return true;
+}
+
+/**
  * print_event:
  *
  * Print data from fanotify_event_metadata struct to stdout.
@@ -105,7 +123,7 @@ print_event (const struct fanotify_event_metadata *data,
     static char pathname[PATH_MAX];
     struct stat st;
 
-    if ((data->mask & option_filter_mask) == 0)
+    if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid))
         return;
 
     /* read process name */
@@ -337,24 +355,6 @@ parse_args (int argc, char** argv)
     }
 }
 
-/**
- * show_pid:
- *
- * Check if events for given PID should be logged.
- *
- * Returns: 1 if PID is to be logged, 0 if not.
- */
-static int
-show_pid (pid_t pid)
-{
-    unsigned int i;
-    for (i = 0; i < ignored_pids_len; ++i)
-        if (pid == ignored_pids[i])
-            return 0;
-
-    return 1;
-}
-
 static void
 signal_handler (int signal)
 {
@@ -456,8 +456,7 @@ main (int argc, char** argv)
         while (FAN_EVENT_OK (data, res)) {
             if (data->vers != FANOTIFY_METADATA_VERSION)
                 errx (EXIT_FAILURE, "Mismatch of fanotify metadata version");
-            if (show_pid (data->pid))
-                print_event (data, &event_time);
+            print_event (data, &event_time);
             close (data->fd);
             data = FAN_EVENT_NEXT (data, res);
         }
