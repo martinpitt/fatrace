@@ -1,3 +1,12 @@
+0.14 (2019-10-01)
+-----------------
+ - Add support for directory events: file creation, rename/move, delete. This
+   requires Linux 5.1 (FAN_REPORT_FID support), on older kernels fall back to
+   the old mode. (Debian #940629, LP: #1371394)
+ - power-usage-report: Fix regexp substitution (LP: #1683164)
+ - Drop O_LARGEFILE workaround, fixes cross-building
+   (Debian #784983, LP: #1755787)
+
 0.13 (2018-03-25)
 -----------------
  - Fix #include file for major() and minor() to avoid a warning with recent
