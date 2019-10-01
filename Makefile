@@ -18,11 +18,7 @@ install: fatrace
 	install -d $(DESTDIR)$(PREFIX)/share/man/man1/
 	install -m 644 *.1 $(DESTDIR)$(PREFIX)/share/man/man1/
 
-dist: distclean
-	files=`ls *`; \
-	mkdir fatrace-$(VERSION); \
-	cp $$files fatrace-$(VERSION); \
-	tar c fatrace-$(VERSION) | bzip2 -9 > fatrace-$(VERSION).tar.bz2; \
-	rm -r fatrace-$(VERSION);
+dist:
+	git ls-tree -r --full-name --name-only HEAD | tar cJvf fatrace-$(VERSION).tar.xz --transform="s,^,fatrace-$(VERSION)/," --exclude=.gitignore --files-from=-
 
-.PHONY: clean distclean install
+.PHONY: clean distclean dist install
