@@ -253,8 +253,11 @@ print_event (const struct fanotify_event_metadata *data,
     if (proc_fd >= 0)
         close (proc_fd);
 
-    if (option_comm && strcmp (option_comm, procname) != 0)
+    if (option_comm && strcmp (option_comm, procname) != 0) {
+        if (event_fd >= 0)
+            close (event_fd);
         return;
+    }
 
 #ifdef FAN_REPORT_FID
     if (fid_mode)
