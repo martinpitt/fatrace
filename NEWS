@@ -1,3 +1,7 @@
+0.15 (2019-11-03)
+-----------------
+ - Fix fd leak with -C when building without FAN_REPORT_FID support
+
 0.14 (2019-10-01)
 -----------------
  - Add support for directory events: file creation, rename/move, delete. This
