@@ -608,7 +608,7 @@ main (int argc, char** argv)
         if (res < 0) {
             if (errno == EINTR)
                 continue;
-            errx (EXIT_FAILURE, "read");
+            err (EXIT_FAILURE, "read");
         }
 
         /* get event time, if requested */
