@@ -227,7 +227,6 @@ print_event (const struct fanotify_event_metadata *data,
 {
     int proc_fd;
     int event_fd = data->fd;
-    ssize_t len;
     static char printbuf[100];
     static char procname[100];
     static char pathname[PATH_MAX];
@@ -237,21 +236,23 @@ print_event (const struct fanotify_event_metadata *data,
         return;
 
     /* read process name */
+    procname[0] = '\0';
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
-    len = 0;
     proc_fd = open (printbuf, O_RDONLY);
     if (proc_fd >= 0) {
-        len = read (proc_fd, procname, sizeof (procname));
-        while (len > 0 && procname[len-1] == '\n') {
-            len--;
+        ssize_t len = read (proc_fd, procname, sizeof (procname));
+        if (len >= 0) {
+            while (len > 0 && procname[len-1] == '\n')
+                len--;
+            procname[len] = '\0';
+        } else {
+            debug ("failed to read /proc/%i/comm", data->pid);
         }
-    }
-    if (len > 0)
-        procname[len] = '\0';
-    else
-        strcpy (procname, "unknown");
-    if (proc_fd >= 0)
+
         close (proc_fd);
+    } else {
+        debug ("failed to open /proc/%i/comm: %m", data->pid);
+    }
 
     if (option_comm && strcmp (option_comm, procname) != 0) {
         if (event_fd >= 0)
@@ -267,7 +268,7 @@ print_event (const struct fanotify_event_metadata *data,
     if (event_fd >= 0) {
         /* try to figure out the path name */
         snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", event_fd);
-        len = readlink (printbuf, pathname, sizeof (pathname));
+        ssize_t len = readlink (printbuf, pathname, sizeof (pathname));
         if (len < 0) {
             /* fall back to the device/inode */
             if (fstat (event_fd, &st) < 0)
@@ -289,7 +290,7 @@ print_event (const struct fanotify_event_metadata *data,
     } else if (option_timestamp == 2) {
         printf ("%li.%06li ", event_time->tv_sec, event_time->tv_usec);
     }
-    printf ("%s(%i): %s %s\n", procname, data->pid, mask2str (data->mask), pathname);
+    printf ("%s(%i): %s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, mask2str (data->mask), pathname);
 }
 
 static void
