@@ -54,8 +54,9 @@ if [[ $(uname -r | cut -f1,2 -d.) > 5.2 ]]; then
     check_log "^touch(.*): + $(dirname $TEST_FILE)$"
     check_log "^mkdir(.*): + $(dirname $TEST_FILE)$"
 
-    # file renaming
-    check_log "^mv(.*): <> $(dirname $TEST_FILE)"
+    # file renaming; usually one event, but can be two
+    check_log "^mv(.*): <>\? $(dirname $TEST_FILE)"
+    check_log "^mv(.*): <\?> $(dirname $TEST_FILE)"
 
     # file moving
     check_log "^mv(.*): < $(dirname $TEST_FILE)$"
