@@ -229,14 +229,15 @@ print_event (const struct fanotify_event_metadata *data,
     int event_fd = data->fd;
     static char printbuf[100];
     static char procname[100];
+    static int procname_pid = -1;
     static char pathname[PATH_MAX];
+    bool got_procname = false;
     struct stat st;
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid))
         return;
 
     /* read process name */
-    procname[0] = '\0';
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
     proc_fd = open (printbuf, O_RDONLY);
     if (proc_fd >= 0) {
@@ -245,6 +246,8 @@ print_event (const struct fanotify_event_metadata *data,
             while (len > 0 && procname[len-1] == '\n')
                 len--;
             procname[len] = '\0';
+            procname_pid = data->pid;
+            got_procname = true;
         } else {
             debug ("failed to read /proc/%i/comm", data->pid);
         }
@@ -252,6 +255,17 @@ print_event (const struct fanotify_event_metadata *data,
         close (proc_fd);
     } else {
         debug ("failed to open /proc/%i/comm: %m", data->pid);
+    }
+
+    /* /proc/pid/comm often goes away before processing the event; reuse previously cached value if pid still matches */
+    if (!got_procname) {
+        if (data->pid == procname_pid) {
+            debug ("re-using cached procname value %s for pid %i", procname, procname_pid);
+        } else if (procname_pid >= 0) {
+            debug ("invalidating previously cached procname %s for pid %i", procname, procname_pid);
+            procname_pid = -1;
+            procname[0] = '\0';
+        }
     }
 
     if (option_comm && strcmp (option_comm, procname) != 0) {
