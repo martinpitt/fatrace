@@ -29,13 +29,11 @@ echo "waiting for fatrace..."
 wait
 
 echo "checking log..."
+RC=0
 check_log() {
     if ! grep -q "$1" $LOG; then
-        echo "$1 not found in log:" >&2
-        echo "===================" >&2
-        cat $LOG >&2
-        echo "===================" >&2
-        exit 1
+        echo "$1 not found in log" >&2
+        ((RC=RC+1))
     fi
 }
 
@@ -65,3 +63,11 @@ if [[ $(uname -r | cut -f1,2 -d.) > 5.2 ]]; then
 else
     echo "skipping FAN_REPORT_FID tests, not available on this kernel"
 fi
+
+if [ $RC -ne 0 ]; then
+   echo "$RC checks failed -- log:" >&2
+   echo "===================" >&2
+   cat $LOG >&2
+   echo "===================" >&2
+fi
+exit $RC
