@@ -15,8 +15,8 @@ distclean: clean
 install: fatrace
 	install -m 755 -D fatrace $(DESTDIR)$(PREFIX)/sbin/fatrace
 	install -m 755 power-usage-report $(DESTDIR)$(PREFIX)/sbin/
-	install -d $(DESTDIR)$(PREFIX)/share/man/man1/
-	install -m 644 *.1 $(DESTDIR)$(PREFIX)/share/man/man1/
+	install -d $(DESTDIR)$(PREFIX)/share/man/man8/
+	install -m 644 *.8 $(DESTDIR)$(PREFIX)/share/man/man8/
 
 dist:
 	git ls-tree -r --full-name --name-only HEAD | tar cJvf fatrace-$(VERSION).tar.xz --transform="s,^,fatrace-$(VERSION)/," --exclude=.gitignore --files-from=-
