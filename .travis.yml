@@ -1,0 +1,8 @@
+dist: focal
+language: c
+sudo: true
+script: |
+  set -ex
+  make
+  uname -a
+  sudo tests/run
