@@ -1,5 +1,3 @@
-VERSION=$(shell head -n1 NEWS | cut -f1 -d' ')
-
 CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PREFIX ?= /usr/local
 
@@ -17,7 +15,4 @@ install: fatrace
 	install -d $(DESTDIR)$(PREFIX)/share/man/man8/
 	install -m 644 *.8 $(DESTDIR)$(PREFIX)/share/man/man8/
 
-dist:
-	git ls-tree -r --full-name --name-only HEAD | tar cJvf fatrace-$(VERSION).tar.xz --transform="s,^,fatrace-$(VERSION)/," --exclude=.gitignore --files-from=-
-
-.PHONY: clean distclean dist install
+.PHONY: clean distclean install
