@@ -1,0 +1,14 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  ubuntu-2004:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v2
+
+      - name: Build
+        run: make
+
+      - name: Run tests
+        run: sudo tests/run

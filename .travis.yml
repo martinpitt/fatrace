@@ -1,6 +1,0 @@
-dist: focal
-language: c
-sudo: true
-script: |
-  make
-  sudo tests/run
