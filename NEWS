@@ -1,104 +1,88 @@
-0.16 (2020-08-22)
------------------
- - Avoid most "unknown" process names on process exit
- - tests: Accept split file rename events (Debian #963714, LP: #1885188)
+## [0.16] - 2020-08-22
+- Avoid most "unknown" process names on process exit
+- tests: Accept split file rename events (Debian #963714, LP: #1885188)
 
-0.15 (2019-11-03)
------------------
- - Fix fd leak with -C when building without FAN_REPORT_FID support
+## [0.15] - 2019-11-03
+- Fix fd leak with -C when building without FAN_REPORT_FID support
 
-0.14 (2019-10-01)
------------------
- - Add support for directory events: file creation, rename/move, delete. This
-   requires Linux 5.1 (FAN_REPORT_FID support), on older kernels fall back to
-   the old mode. (Debian #940629, LP: #1371394)
- - power-usage-report: Fix regexp substitution (LP: #1683164)
- - Drop O_LARGEFILE workaround, fixes cross-building
-   (Debian #784983, LP: #1755787)
+## [0.14] - 2019-10-01
+- Add support for directory events: file creation, rename/move, delete. This
+  requires Linux 5.1 (FAN_REPORT_FID support), on older kernels fall back to
+  the old mode. (Debian #940629, LP: #1371394)
+- power-usage-report: Fix regexp substitution (LP: #1683164)
+- Drop O_LARGEFILE workaround, fixes cross-building
+  (Debian #784983, LP: #1755787)
 
-0.13 (2018-03-25)
------------------
- - Fix #include file for major() and minor() to avoid a warning with recent
-   glibc.
+## [0.13] - 2018-03-25
+- Fix #include file for major() and minor() to avoid a warning with recent
+  glibc.
 
-0.12 (2016-04-25)
------------------
- - Fix crash introdued in 0.10 when using the -p option. Thanks Yuriy M.
-   Kaminski! (Debian #817247, LP: #1563919)
+## [0.12] - 2016-04-25
+- Fix crash introdued in 0.10 when using the -p option. Thanks Yuriy M.
+  Kaminski! (Debian #817247, LP: #1563919)
 
-0.11 (2015-11-08)
------------------
- - Make compatible with musl libc. Thanks Christian Neukirchen!
- - Add -C/--command option to only show events for a particular command. Thanks
-   Christian Neukirchen!
+## [0.11] - 2015-11-08
+- Make compatible with musl libc. Thanks Christian Neukirchen!
+- Add -C/--command option to only show events for a particular command. Thanks
+  Christian Neukirchen!
 
-0.10 (2015-04-29)
------------------
- - Add --filter/-f option to only show selected event types. Thanks to Bryce
-   Nesbitt!
+## [0.10] - 2015-04-29
+- Add --filter/-f option to only show selected event types. Thanks to Bryce
+  Nesbitt!
 
-0.9 (2014-11-07)
-----------------
- - power-usage-report: Adjust parsing to also work for powertop 2.6.
+## [0.9] - 2014-11-07
+- power-usage-report: Adjust parsing to also work for powertop 2.6.
 
-0.8 (2014-09-23)
-----------------
- - The previous O_LARGEFILE change to fix "Value too large for defined data
-   type" error was ineffective, as in userspace this value is 0 on the affected
-   platforms. Use the real numeric value to work around the problem for systems
-   which run an older kernel that does not yet have the real fix.
-   (LP: #1372873)
+## [0.8] - 2014-09-23
+- The previous O_LARGEFILE change to fix "Value too large for defined data
+  type" error was ineffective, as in userspace this value is 0 on the affected
+  platforms. Use the real numeric value to work around the problem for systems
+  which run an older kernel that does not yet have the real fix.
+  (LP: #1372873)
 
-0.7 (2014-08-07)
-----------------
- - Use O_LARGEFILE to fix "Value too large for defined data type" error with
-   large files on some platforms. (LP: #1161989)
- - Increase buffer size to 256 KiB. (LP: #1312095)
+## [0.7] - 2014-08-07
+- Use O_LARGEFILE to fix "Value too large for defined data type" error with
+  large files on some platforms. (LP: #1161989)
+- Increase buffer size to 256 KiB. (LP: #1312095)
 
-0.6 (2014-01-07)
-----------------
+## [0.6] - 2014-01-07
 Bug fixes:
- - More careful check of uninteresting mount points, only consider those with a
-   '/' in it. Thanks Heinrich Schuchardt!
- - power-usage-report: Fix output parsing for PowerTOP 2.5. (LP: #1265142)
+- More careful check of uninteresting mount points, only consider those with a
+  '/' in it. Thanks Heinrich Schuchardt!
+- power-usage-report: Fix output parsing for PowerTOP 2.5. (LP: #1265142)
 
-0.5 (2013-04-11)
-----------------
+## [0.5] - 2013-04-11
 Improvements:
- - Some code optimizations, thanks Yann Droneaud!
- - power-usage-report: Use current powertop 2 (LP: #937703)
- - power-usage-report: Use Python 3
- - power-usage-report: Include "Process Device Activity" section from powertop
+- Some code optimizations, thanks Yann Droneaud!
+- power-usage-report: Use current powertop 2 (LP: #937703)
+- power-usage-report: Use Python 3
+- power-usage-report: Include "Process Device Activity" section from powertop
 
-0.4 (2012-02-21)
-----------------
+## [0.4] - 2012-02-21
 Improvements:
- - Add power-usage-report script which uses fatrace and powertop-1.13 to
-   collect data about file accesses, wakeups, and device stats and generates a
-   developer/power-user oriented report which can be used for identifying power
-   usage problems.
+- Add power-usage-report script which uses fatrace and powertop-1.13 to
+  collect data about file accesses, wakeups, and device stats and generates a
+  developer/power-user oriented report which can be used for identifying power
+  usage problems.
 
-0.3 (2012-02-17)
-----------------
+## [0.3] - 2012-02-17
 Bug fixes:
- - Fix --ignore-pid short option (-p, not -i) in --help.
- - Tell apart closing for reading ("C") and closing for writing ("CW"). Point
-   this out in the manpage.
+- Fix --ignore-pid short option (-p, not -i) in --help.
+- Tell apart closing for reading ("C") and closing for writing ("CW"). Point
+  this out in the manpage.
 
-0.2 (2012-02-15)
-----------------
+## [0.2] - 2012-02-15
 Improvements:
- - --output does not overwrite already existing files.
- - Some code cleanup and robustification, thanks Yann Droneaud!
- - Proper handling of Control-C (SIGINT), thanks Yann Droneaud!
- - When specifying --timestamp twice, print time as seconds since epoch, which
-   is easier for automatic post-processing.
+- --output does not overwrite already existing files.
+- Some code cleanup and robustification, thanks Yann Droneaud!
+- Proper handling of Control-C (SIGINT), thanks Yann Droneaud!
+- When specifying --timestamp twice, print time as seconds since epoch, which
+  is easier for automatic post-processing.
 
 Bug fixes:
- - Listen to "close" events as well.
- - Simplify and robustify determination of path names. This also fixes the
-   races which led to many events being shown with device/inode only.
+- Listen to "close" events as well.
+- Simplify and robustify determination of path names. This also fixes the
+  races which led to many events being shown with device/inode only.
 
-0.1 (2012-02-07)
-----------------
+## [0.1] - 2012-02-07
 Initial version.
