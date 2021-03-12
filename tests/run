@@ -2,9 +2,9 @@
 set -eu
 
 MYDIR=$(dirname $(readlink -f "$0"))
-export PATH=.:$PATH
+export PATH=$(pwd):$PATH
 
-for t in fatrace fatrace-currentmount; do
+for t in fatrace fatrace-currentmount fatrace-btrfs; do
     export AUTOPKGTEST_TMP=$(mktemp -d)
     echo "===== $t ===="
     "$MYDIR"/$t

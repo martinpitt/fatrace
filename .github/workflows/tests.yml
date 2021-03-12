@@ -35,13 +35,13 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v2
 
-      - name: Install build dependencies
+      - name: Install build and test dependencies
         run: |
           if type apt >/dev/null 2>&1; then
               apt-get update
-              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc-dev make python3
+              DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc libc-dev make python3 btrfs-progs
           else
-              dnf install -y gcc glibc-devel make python3
+              dnf install -y gcc glibc-devel make python3 btrfs-progs
           fi
 
       - name: Build
@@ -51,5 +51,11 @@ jobs:
       - name: Run currentmount tests
         run: |
           export AUTOPKGTEST_TMP=$(mktemp -d)
-          export PATH=.:$PATH
+          export PATH=$(pwd):$PATH
           tests/fatrace-currentmount
+
+      - name: Run btrfs tests
+        run: |
+          export AUTOPKGTEST_TMP=$(mktemp -d)
+          export PATH=$(pwd):$PATH
+          tests/fatrace-btrfs
