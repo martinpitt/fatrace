@@ -152,7 +152,7 @@ get_fid_event_fd (const struct fanotify_event_metadata *data)
                             (struct file_handle *) fid->handle, O_RDONLY);
     /* ignore ESTALE for deleted fds between the notification and handling it */
     if (fd < 0 && errno != ESTALE)
-        err (EXIT_FAILURE, "open_by_handle_at");
+        warn ("open_by_handle_at");
 
     return fd;
 }
