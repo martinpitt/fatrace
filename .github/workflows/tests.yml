@@ -1,5 +1,9 @@
 name: tests
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: 0 4 * * MON,FRI
 jobs:
   vm:
     runs-on: ubuntu-20.04
