@@ -592,6 +592,7 @@ main (int argc, char** argv)
             err (EXIT_FAILURE, "Failed to open output file");
         fflush (stdout);
         dup2 (fd, STDOUT_FILENO);
+        setlinebuf (stdout);
         close (fd);
     }
 
