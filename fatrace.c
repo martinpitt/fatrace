@@ -322,8 +322,9 @@ do_mark (int fan_fd, const char *dir, bool fatal)
     res = fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir);
 
 #ifdef FAN_MARK_FILESYSTEM
-    /* fallback for Linux < 4.20 */
-    if (res < 0 && errno == EINVAL && mark_mode & FAN_MARK_FILESYSTEM)
+    if (res < 0 && (mark_mode & FAN_MARK_FILESYSTEM) &&
+        (errno == EINVAL || /* fallback for Linux < 4.20 */
+         errno == EXDEV)) /* unsupported on file system (like btrfs) */
     {
         debug ("FAN_MARK_FILESYSTEM not supported; falling back to FAN_MARK_MOUNT");
         mark_mode = FAN_MARK_ADD | FAN_MARK_MOUNT;
