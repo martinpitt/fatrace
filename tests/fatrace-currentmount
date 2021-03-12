@@ -25,6 +25,11 @@ mv "${TEST_FILE}.2" dest/"${TEST_FILE}.2"
 rm dest/"${TEST_FILE}.2"
 rmdir dest
 
+echo "robustness against ELOOP"
+ln -s nothing link
+python3 -c 'import os; os.open("link", os.RDONLY | os.NOFOLLOW)' 2>/dev/null || true
+rm link
+
 echo "waiting for fatrace..."
 wait
 
@@ -60,10 +65,15 @@ check_log "^mv(.*): <\?> $(dirname $TEST_FILE)"
 check_log "^mv(.*): < $(dirname $TEST_FILE)$"
 check_log "^mv(.*): > $(dirname $TEST_FILE)/dest$"
 
+# ELOOP ln/rm
+check_log "^ln(.*): + $(dirname $TEST_FILE)$"
+check_log "^rm(.*): D $(dirname $TEST_FILE)$"
+
 if [ $RC -ne 0 ]; then
    echo "$RC checks failed -- log:" >&2
    echo "===================" >&2
    cat $LOG >&2
    echo "===================" >&2
 fi
+
 exit $RC
