@@ -592,9 +592,11 @@ main (int argc, char** argv)
             err (EXIT_FAILURE, "Failed to open output file");
         fflush (stdout);
         dup2 (fd, STDOUT_FILENO);
-        setlinebuf (stdout);
         close (fd);
     }
+
+    /* useful for live tailing and multiple writers */
+    setlinebuf (stdout);
 
     /* setup signal handler to cleanly stop the program */
     sa.sa_handler = signal_handler;
