@@ -53,9 +53,3 @@ jobs:
           export AUTOPKGTEST_TMP=$(mktemp -d)
           export PATH=$(pwd):$PATH
           tests/fatrace-currentmount
-
-      - name: Run btrfs tests
-        run: |
-          export AUTOPKGTEST_TMP=$(mktemp -d)
-          export PATH=$(pwd):$PATH
-          tests/fatrace-btrfs
