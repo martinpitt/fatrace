@@ -1,3 +1,8 @@
+## [0.16.3] - 2021-05-15
+ - Always use line buffering
+ - Fix fd leak with `-f` event type filtering. Thanks Stefan Dotterweich!
+   (#8, LP: #1858305)
+
 ## [0.16.2] - 2021-03-12
  - Use line buffering with --output to get live logs (#6)
  - Make open_by_handle_at() failures non-fatal (#2)
