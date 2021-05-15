@@ -235,8 +235,11 @@ print_event (const struct fanotify_event_metadata *data,
     bool got_procname = false;
     struct stat st;
 
-    if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid))
+    if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
+        if (event_fd >= 0)
+            close (event_fd);
         return;
+    }
 
     /* read process name */
     snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
