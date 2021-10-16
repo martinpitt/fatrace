@@ -16,6 +16,8 @@ mkdir -p "$MOUNT"
 mount -o loop "$IMAGE" "$MOUNT"
 trap "umount -l '$MOUNT'" EXIT INT QUIT PIPE
 
+btrfs subvolume create "$MOUNT/subv1"
+
 cd "$MOUNT"
 
 echo "hello" > world.txt
@@ -42,6 +44,10 @@ mkdir dest
 mv "${TEST_FILE}.2" dest/"${TEST_FILE}.2"
 rm dest/"${TEST_FILE}.2"
 rmdir dest
+
+echo "create a file on a subvolume"
+touch subv1/sub.txt
+SUBVOL_FILE=$(realpath subv1/sub.txt)
 
 echo "waiting for fatrace..."
 wait
@@ -77,6 +83,9 @@ check_log "^mv(.*): <\?> $(dirname $TEST_FILE)"
 # file moving
 check_log "^mv(.*): < $(dirname $TEST_FILE)$"
 check_log "^mv(.*): > $(dirname $TEST_FILE)/dest$"
+
+# subvolume
+check_log "^touch.* C\?W\?O $SUBVOL_FILE"
 
 if [ $RC -ne 0 ]; then
    echo "$RC checks failed -- log:" >&2
