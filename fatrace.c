@@ -149,7 +149,7 @@ get_fid_event_fd (const struct fanotify_event_metadata *data)
 
     /* get affected file fd from fanotify_event_info_fid */
     fd = open_by_handle_at (get_mount_id ((const fsid_t *) &fid->fsid),
-                            (struct file_handle *) fid->handle, O_RDONLY);
+                            (struct file_handle *) fid->handle, O_RDONLY|O_NONBLOCK);
     /* ignore ESTALE for deleted fds between the notification and handling it */
     if (fd < 0 && errno != ESTALE)
         warn ("open_by_handle_at");
@@ -653,4 +653,3 @@ main (int argc, char** argv)
 
     return 0;
 }
-
