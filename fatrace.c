@@ -308,7 +308,7 @@ print_event (const struct fanotify_event_metadata *data,
     } else if (option_timestamp == 2) {
         printf ("%li.%06li ", event_time->tv_sec, event_time->tv_usec);
     }
-    printf ("%s(%i): %s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, mask2str (data->mask), pathname);
+    printf ("%s(%i): %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, mask2str (data->mask), pathname);
 }
 
 static void

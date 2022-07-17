@@ -62,30 +62,30 @@ check_log() {
 }
 
 # accessing the world.txt file
-check_log "RC\?O\? $(pwd)/world.txt$"
+check_log "RC\?O\? \+$(pwd)/world.txt$"
 # file creation
 TEST_FILE=$(realpath "$TEST_FILE")
-check_log "^touch.* C\?W\?O $TEST_FILE"
-check_log "^touch.* C\?WO\? $TEST_FILE"
-check_log "^bash(.* C\?WO\? $TEST_FILE"
+check_log "^touch.* C\?W\?O \+$TEST_FILE"
+check_log "^touch.* C\?WO\? \+$TEST_FILE"
+check_log "^bash(.* C\?WO\? \+$TEST_FILE"
 
 # file deletion
-check_log "^rm(.*): D $(dirname $TEST_FILE)$"
+check_log "^rm(.*): D   $(dirname $TEST_FILE)$"
 
 # dir creation
-check_log "^touch(.*): + $(dirname $TEST_FILE)$"
-check_log "^mkdir(.*): + $(dirname $TEST_FILE)$"
+check_log "^touch(.*): +   $(dirname $TEST_FILE)$"
+check_log "^mkdir(.*): +   $(dirname $TEST_FILE)$"
 
 # file renaming; usually one event, but can be two
-check_log "^mv(.*): <>\? $(dirname $TEST_FILE)"
-check_log "^mv(.*): <\?> $(dirname $TEST_FILE)"
+check_log "^mv(.*): <>\? \+$(dirname $TEST_FILE)"
+check_log "^mv(.*): <\?> \+$(dirname $TEST_FILE)"
 
 # file moving
-check_log "^mv(.*): < $(dirname $TEST_FILE)$"
-check_log "^mv(.*): > $(dirname $TEST_FILE)/dest$"
+check_log "^mv(.*): <   $(dirname $TEST_FILE)$"
+check_log "^mv(.*): >   $(dirname $TEST_FILE)/dest$"
 
 # subvolume
-check_log "^touch.* C\?W\?O $SUBVOL_FILE"
+check_log "^touch.* C\?W\?O \+$SUBVOL_FILE"
 
 if [ $RC -ne 0 ]; then
    echo "$RC checks failed -- log:" >&2

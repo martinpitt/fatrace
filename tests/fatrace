@@ -31,19 +31,19 @@ check_log() {
 }
 
 # accessing the "head" binary
-check_log "RC\?O\? /usr/bin/head$"
+check_log "RC\?O\? \+/usr/bin/head$"
 # head accessing /etc/passwd
-check_log "RC\?O\? /etc/passwd$"
+check_log "RC\?O\? \+/etc/passwd$"
 # file creation
-check_log "^touch.* C\?W\?O $TEST_FILE"
-check_log "^touch.* C\?WO\? $TEST_FILE"
-check_log "^bash(.* C\?WO\? $TEST_FILE"
+check_log "^touch.* C\?W\?O \+$TEST_FILE"
+check_log "^touch.* C\?WO\? \+$TEST_FILE"
+check_log "^bash(.* C\?WO\? \+$TEST_FILE"
 
 # file creation
-check_log "^touch(.*): + $(dirname $TEST_FILE)$"
+check_log "^touch(.*): +   $(dirname $TEST_FILE)$"
 
 # file deletion
-check_log "^rm(.*): D $(dirname $TEST_FILE)"
+check_log "^rm(.*): D   $(dirname $TEST_FILE)"
 
 if [ $RC -ne 0 ]; then
    echo "$RC checks failed -- log:" >&2
