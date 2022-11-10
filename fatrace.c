@@ -375,9 +375,12 @@ setup_fanotify (int fan_fd)
     while ((mount = getmntent (mounts)) != NULL) {
         /* Only consider mounts which have an actual device or bind mount
          * point. The others are stuff like proc, sysfs, binfmt_misc etc. which
-         * are virtual and do not actually cause disk access. */
-        if (mount->mnt_fsname == NULL || access (mount->mnt_fsname, F_OK) != 0 ||
-            mount->mnt_fsname[0] != '/') {
+         * are virtual and do not actually cause disk access. 
+         * zfs mount point don't start with a "/" so allow them anyway */
+        if (mount->mnt_fsname == NULL || 
+            (strcmp(mount->mnt_type, "zfs") != 0 && (access (mount->mnt_fsname, F_OK) != 0 || 
+                                                    mount->mnt_fsname[0] != '/'))
+            ) {
             debug ("ignore: fsname: %s dir: %s type: %s", mount->mnt_fsname, mount->mnt_dir, mount->mnt_type);
             continue;
         }
