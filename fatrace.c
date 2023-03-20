@@ -58,6 +58,7 @@ static long option_filter_mask = 0xffffffff;
 static long option_timeout = -1;
 static int option_current_mount = 0;
 static int option_timestamp = 0;
+static int option_user = 0;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
@@ -226,14 +227,13 @@ static void
 print_event (const struct fanotify_event_metadata *data,
              const struct timeval *event_time)
 {
-    int proc_fd;
     int event_fd = data->fd;
     static char printbuf[100];
     static char procname[100];
     static int procname_pid = -1;
     static char pathname[PATH_MAX];
     bool got_procname = false;
-    struct stat st;
+    struct stat proc_fd_stat = { .st_uid = -1 };
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
@@ -241,11 +241,12 @@ print_event (const struct fanotify_event_metadata *data,
         return;
     }
 
-    /* read process name */
-    snprintf (printbuf, sizeof (printbuf), "/proc/%i/comm", data->pid);
-    proc_fd = open (printbuf, O_RDONLY);
+    snprintf (printbuf, sizeof (printbuf), "/proc/%i", data->pid);
+    int proc_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
-        ssize_t len = read (proc_fd, procname, sizeof (procname));
+        /* read process name */
+        int procname_fd = openat (proc_fd, "comm", O_RDONLY);
+        ssize_t len = read (procname_fd, procname, sizeof (procname));
         if (len >= 0) {
             while (len > 0 && procname[len-1] == '\n')
                 len--;
@@ -256,9 +257,18 @@ print_event (const struct fanotify_event_metadata *data,
             debug ("failed to read /proc/%i/comm", data->pid);
         }
 
+        close (procname_fd);
+
+        /* get user and group */
+        if (option_user) {
+            if (fstat (proc_fd, &proc_fd_stat) < 0)
+                debug ("failed to stat /proc/%i: %m", data->pid);
+        }
+
         close (proc_fd);
     } else {
-        debug ("failed to open /proc/%i/comm: %m", data->pid);
+        debug ("failed to open /proc/%i: %m", data->pid);
+        procname[0] = '\0';
     }
 
     /* /proc/pid/comm often goes away before processing the event; reuse previously cached value if pid still matches */
@@ -289,6 +299,7 @@ print_event (const struct fanotify_event_metadata *data,
         ssize_t len = readlink (printbuf, pathname, sizeof (pathname));
         if (len < 0) {
             /* fall back to the device/inode */
+            struct stat st;
             if (fstat (event_fd, &st) < 0)
                 err (EXIT_FAILURE, "stat");
             snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
@@ -308,7 +319,14 @@ print_event (const struct fanotify_event_metadata *data,
     } else if (option_timestamp == 2) {
         printf ("%li.%06li ", event_time->tv_sec, event_time->tv_usec);
     }
-    printf ("%s(%i): %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, mask2str (data->mask), pathname);
+
+    /* print user and group */
+    if (option_user && proc_fd_stat.st_uid != (uid_t)-1)
+        snprintf(printbuf, sizeof printbuf, " [%u:%u]", proc_fd_stat.st_uid, proc_fd_stat.st_gid);
+    else
+        printbuf[0] = '\0';
+
+    printf ("%s(%i)%s: %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
 }
 
 static void
@@ -412,6 +430,7 @@ help (void)
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
+"  -u, --user\t\t\tAdd user ID and group ID to events.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, or W, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
@@ -436,6 +455,7 @@ parse_args (int argc, char** argv)
         {"output",        required_argument, 0, 'o'},
         {"seconds",       required_argument, 0, 's'},
         {"timestamp",     no_argument,       0, 't'},
+        {"user",          no_argument,       0, 'u'},
         {"ignore-pid",    required_argument, 0, 'p'},
         {"filter",        required_argument, 0, 'f'},
         {"command",       required_argument, 0, 'C'},
@@ -444,7 +464,7 @@ parse_args (int argc, char** argv)
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tp:f:h", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -460,6 +480,10 @@ parse_args (int argc, char** argv)
 
             case 'o':
                 option_output = strdup (optarg);
+                break;
+
+            case 'u':
+                option_user = 1;
                 break;
 
             case 'f':
