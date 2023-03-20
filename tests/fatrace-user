@@ -1,0 +1,64 @@
+#!/bin/sh
+set -euC
+
+USER=nobody
+ROOT_LOG="\\[0:0\\]"
+USER_LOG="\\[$(id -u $USER):$(id -g $USER)\\]"
+
+mkdir -m 777 tmp
+trap "rm -rf tmp" EXIT INT QUIT PIPE
+
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
+echo "starting fatrace..."
+fatrace --current-mount --user -s 2 -o $LOG &
+sleep 1
+
+echo "read a file as root ..."
+head NEWS > /dev/null
+
+echo "read a file as user ..."
+runuser -u $USER tail NEWS > /dev/null
+
+echo "create/remove a file as root..."
+TEST_FILE_ROOT=testroot.txt
+touch "$TEST_FILE_ROOT"
+rm "$TEST_FILE_ROOT"
+
+echo "create/remove a file as usr..."
+TEST_FILE_USER=tmp/test$USER.txt
+runuser -u $USER touch "$TEST_FILE_USER"
+runuser -u $USER rm "$TEST_FILE_USER"
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+RC=0
+check_log() {
+    if ! grep -q "$1" $LOG; then
+        echo "$1 not found in log" >&2
+        ((RC=RC+1))
+    fi
+}
+
+# accessing the NEWS file as root
+check_log "^head([0-9]*) $ROOT_LOG: RC\?O\? \+$(pwd)/NEWS$"
+
+# accessing the NEWS file as user
+check_log "^tail([0-9]*) $USER_LOG: RC\?O\? \+$(pwd)/NEWS$"
+
+# file creation as root
+TEST_FILE_ROOT=$(realpath "$TEST_FILE_ROOT")
+check_log "^touch([0-9]*) $ROOT_LOG: C\?W\?O \+$TEST_FILE_ROOT"
+
+TEST_FILE_USER=$(realpath "$TEST_FILE_USER")
+check_log "^touch([0-9]*) $USER_LOG: C\?W\?O \+$TEST_FILE_USER"
+
+if [ $RC -ne 0 ]; then
+   echo "$RC checks failed -- log:" >&2
+   echo "===================" >&2
+   cat $LOG >&2
+   echo "===================" >&2
+fi
+
+exit $RC
