@@ -6,10 +6,10 @@ on:
     - cron: 0 4 * * MON,FRI
 jobs:
   vm:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Clone repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Build
         run: make
@@ -18,7 +18,7 @@ jobs:
         run: sudo tests/run
 
   container:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +33,7 @@ jobs:
       options: --privileged
     steps:
       - name: Clone repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install build and test dependencies
         run: |
