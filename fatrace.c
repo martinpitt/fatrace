@@ -61,6 +61,8 @@ static int option_timestamp = 0;
 static int option_user = 0;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
+static char ignored_procnames[1024][100];
+static unsigned int ignored_procnames_len = 0;
 static char* option_comm = NULL;
 
 /* --time alarm sets this to 0 */
@@ -219,6 +221,24 @@ show_pid (pid_t pid)
 }
 
 /**
+ * show_procname:
+ *
+ * Check if events for given process name should be logged.
+ *
+ * Returns: true if procname is to be logged, false if not.
+ */
+static bool
+show_procname (char* procname)
+{
+    unsigned int i;
+    for (i = 0; i < ignored_procnames_len; ++i)
+        if (strcmp(procname, ignored_procnames[i]) == 0)
+            return false;
+
+    return true;
+}
+
+/**
  * print_event:
  *
  * Print data from fanotify_event_metadata struct to stdout.
@@ -258,6 +278,14 @@ print_event (const struct fanotify_event_metadata *data,
         }
 
         close (procname_fd);
+
+        /* filter process by name */
+        if (!show_procname (procname)) {
+            close (proc_fd);
+            if (event_fd >= 0)
+                close (event_fd);
+            return;
+        }
 
         /* get user and group */
         if (option_user) {
@@ -432,6 +460,7 @@ help (void)
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -u, --user\t\t\tAdd user ID and group ID to events.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
+"  -n process-name, --ignore-name process-name\tIgnore events for this process. Can be specified multiple times.\n"
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, or W, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -h, --help\t\t\tShow help.");
@@ -457,6 +486,7 @@ parse_args (int argc, char** argv)
         {"timestamp",     no_argument,       0, 't'},
         {"user",          no_argument,       0, 'u'},
         {"ignore-pid",    required_argument, 0, 'p'},
+        {"ignore-name",   required_argument, 0, 'n'},
         {"filter",        required_argument, 0, 'f'},
         {"command",       required_argument, 0, 'C'},
         {"help",          no_argument,       0, 'h'},
@@ -464,7 +494,7 @@ parse_args (int argc, char** argv)
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:h", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:n:f:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -538,6 +568,13 @@ parse_args (int argc, char** argv)
                     ignored_pids[ignored_pids_len++] = pid;
                 else
                     errx (EXIT_FAILURE, "Error: Too many ignored PIDs");
+                break;
+
+            case 'n':
+                if (ignored_procnames_len < sizeof (ignored_procnames))
+                    strncpy(ignored_procnames[ignored_procnames_len++], optarg, 100);
+                else
+                    errx (EXIT_FAILURE, "Error: Too many ignored process names");
                 break;
 
             case 't':
