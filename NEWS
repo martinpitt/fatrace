@@ -1,3 +1,8 @@
+## [0.18.0] - 2025-01-19
+ - Add -u/--user option to show [uid:gid] in events (thanks Gabriel Kulp!)
+ - Truncate overly long --command matches
+ - Turn invalid FID type error into warning
+
 ## [0.17.0] - 2022-11-11
  - Work around kernel bug with blocking FAN_REPORT_FID with btrfs
  - Improve event formatting
