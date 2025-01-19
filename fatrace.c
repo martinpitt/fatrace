@@ -145,8 +145,10 @@ get_fid_event_fd (const struct fanotify_event_metadata *data)
     const struct fanotify_event_info_fid *fid = (const struct fanotify_event_info_fid *) (data + 1);
     int fd;
 
-    if (fid->hdr.info_type != FAN_EVENT_INFO_TYPE_FID)
-        errx (EXIT_FAILURE, "Received unexpected event info type %i", fid->hdr.info_type);
+    if (fid->hdr.info_type != FAN_EVENT_INFO_TYPE_FID) {
+        warnx ("Received unexpected event info type %i, cannot get affected file", fid->hdr.info_type);
+        return -1;
+    }
 
     /* get affected file fd from fanotify_event_info_fid */
     fd = open_by_handle_at (get_mount_id ((const fsid_t *) &fid->fsid),
