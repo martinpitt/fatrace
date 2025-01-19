@@ -45,6 +45,11 @@
 
 #define BUFSIZE 256*1024
 
+/* https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html ; not defined in any include file */
+#ifndef TASK_COMM_LEN
+#define TASK_COMM_LEN 16
+#endif
+
 #define DEBUG 0
 #if DEBUG
 #define debug(fmt, ...) fprintf (stderr, "DEBUG: " fmt "\n", ##__VA_ARGS__)
@@ -231,7 +236,7 @@ print_event (const struct fanotify_event_metadata *data,
 {
     int event_fd = data->fd;
     static char printbuf[100];
-    static char procname[100];
+    static char procname[TASK_COMM_LEN];
     static int procname_pid = -1;
     static char pathname[PATH_MAX];
     bool got_procname = false;
@@ -474,6 +479,11 @@ parse_args (int argc, char** argv)
         switch (c) {
             case 'C':
                 option_comm = strdup (optarg);
+                /* see https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html */
+                if (strlen (option_comm) > TASK_COMM_LEN - 1) {
+                    option_comm[TASK_COMM_LEN - 1] = '\0';
+                    warnx ("--command truncated to %i characters: %s", TASK_COMM_LEN - 1, option_comm);
+                }
                 break;
 
             case 'c':
