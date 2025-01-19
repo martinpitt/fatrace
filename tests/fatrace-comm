@@ -5,7 +5,7 @@ mkdir -m 777 tmp
 trap "rm -rf tmp" EXIT INT QUIT PIPE
 
 LOG="$AUTOPKGTEST_TMP/fatrace.log"
-echo "starting fatrace..."
+echo "starting fatrace --command touch..."
 fatrace --current-mount --command touch -s 2 -o $LOG &
 sleep 1
 
@@ -31,6 +31,18 @@ if grep -Eq "notme|^dd" $LOG; then
     echo "notme found in log" >&2
     ((RC=RC+1))
 fi
+
+# exceeds TASK_COMM_LEN
+rm $LOG
+cp $(which touch) tmp/VeryLongTouchCommand
+echo "starting fatrace --command VeryLongTouchCommand..."
+fatrace --current-mount --command VeryLongTouchCommand -s 2 -o $LOG &
+sleep 1
+tmp/VeryLongTouchCommand tmp/hello.txt
+echo "waiting for fatrace..."
+wait
+
+check_log "^VeryLongTouchCo([0-9]*).*hello.txt$"
 
 if [ $RC -ne 0 ]; then
    echo "$RC checks failed -- log:" >&2
