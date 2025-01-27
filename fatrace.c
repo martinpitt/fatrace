@@ -445,7 +445,7 @@ help (void)
 "\n"
 "Options:\n"
 "  -c, --current-mount\t\tOnly record events on partition/mount of current directory.\n"
-"  -d DIRECTORY\t\t\tSpecify directory to be watched.\n
+"  -d DIRECTORY\t\t\tSpecify directory to be watched.\n"
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
