@@ -62,6 +62,7 @@ static char* option_output = NULL;
 static long option_filter_mask = 0xffffffff;
 static long option_timeout = -1;
 static int option_current_mount = 0;
+static char* option_directory = NULL;
 static int option_timestamp = 0;
 static int option_user = 0;
 static pid_t ignored_pids[1024];
@@ -321,7 +322,7 @@ print_event (const struct fanotify_event_metadata *data,
 
     /* print event */
     if (option_timestamp == 1) {
-        strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time->tv_sec));
+        strftime (printbuf, sizeof (printbuf), "%Y-%m-%d-%H:%M:%S", localtime (&event_time->tv_sec));
         printf ("%s.%06li ", printbuf, event_time->tv_usec);
     } else if (option_timestamp == 2) {
         printf ("%li.%06li ", event_time->tv_sec, event_time->tv_usec);
@@ -390,8 +391,10 @@ setup_fanotify (int fan_fd)
 
     /* iterate over all mounts; explicitly start with the root dir, to get
      * the shortest possible paths on fsid resolution on e. g. OSTree */
-    do_mark (fan_fd, "/", false);
-    add_fsid ("/");
+    if (option_directory == NULL) {
+        do_mark (fan_fd, "/", false);
+        add_fsid ("/");
+    }
 
     mounts = setmntent ("/proc/self/mounts", "r");
     if (mounts == NULL)
@@ -414,6 +417,14 @@ setup_fanotify (int fan_fd)
         if (strcmp (mount->mnt_dir, "/") == 0)
             continue;
 
+        if (option_directory != NULL) {
+            if (strstr (mount->mnt_dir, option_directory) == NULL) {
+                continue;
+            } else {
+                warnx ("Watching path: %s", mount->mnt_dir);
+            }
+        }
+
         debug ("add watch for %s mount %s", mount->mnt_type, mount->mnt_dir);
         do_mark (fan_fd, mount->mnt_dir, false);
         add_fsid (mount->mnt_dir);
@@ -434,6 +445,7 @@ help (void)
 "\n"
 "Options:\n"
 "  -c, --current-mount\t\tOnly record events on partition/mount of current directory.\n"
+"  -d DIRECTORY\t\t\tSpecify directory to be watched.\n
 "  -o FILE, --output=FILE\tWrite events to a file instead of standard output.\n"
 "  -s SECONDS, --seconds=SECONDS\tStop after the given number of seconds.\n"
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
@@ -471,7 +483,7 @@ parse_args (int argc, char** argv)
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:h", long_options, NULL);
+        c = getopt_long (argc, argv, "C:cd:o:s:tup:f:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -488,6 +500,10 @@ parse_args (int argc, char** argv)
 
             case 'c':
                 option_current_mount = 1;
+                break;
+
+            case 'd':
+                option_directory = strdup (optarg);
                 break;
 
             case 'o':
