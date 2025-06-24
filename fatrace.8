@@ -29,7 +29,10 @@ output line. To avoid this, redirect the output into a file.
 
 .SH OUTPUT FORMAT
 
-A typical event looks like
+There are two output formats. The default text format is easier on human eyes,
+while the JSONL format is more suitable for automatic processing.
+
+In text format, a typical event looks like
 
 .RS 4
 rsyslogd(875): W /var/log/auth.log
@@ -37,7 +40,7 @@ rsyslogd(875): W /var/log/auth.log
 compiz(1971): O device 8:2 inode 658203
 .RE
 
-The line has the following fields:
+In text format, the line has the following fields:
 
 .IP \(bu 2
 The current time, if you specify the
@@ -71,6 +74,69 @@ because it is a temporary file which is already deleted. In that case, it
 prints the devices' major and minor number and the inode number. To examine
 such a process in more detail, you should consider using
 .BR strace (1).
+
+.RE
+
+In JSONL format, the line is a JSON-encoded object with the following fields:
+
+.TP
+.B timestamp
+The current time, if you specify the
+.B \-\-timestamp
+option.
+
+.TP
+.B comm
+Process name, if it can be determined. This is read from /proc/pid/comm, and
+might be abbreviated for long process names.
+
+.TP
+.B comm_raw
+The raw bytes of the process name, in case it is invalid UTF-8 or would require escaping.
+
+.TP
+.B pid
+Process ID
+
+.TP
+.B uid
+UID, if you specify the
+.B \-\-user
+option and it can be determined.
+
+.TP
+.B gid
+GID, if you specify the
+.B \-\-user
+option and it can be determined.
+
+.TP
+.B types
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
+directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
+or \fB>\fR (moved to).
+Combinations are possible, such as \fBCW\fR for closing a written file, or <>
+for renaming a file within the same directory.
+
+Directory events can only be detected on Linux 5.1 or higher.
+
+.TP
+.B device
+device ID in
+.B {"major":major,"minor":minor}
+form, if it can be determined.
+
+.TP
+.B inode
+The file inode, if it can be determined.
+
+.TP
+.B path
+The path to the affected file, if it can be determined.
+
+.TP
+.B path_raw
+The raw bytes of the path to the affected file, in case it is invalid UTF-8 or would require escaping.
 
 .SH OPTIONS
 
@@ -117,6 +183,10 @@ to only show open and close events.
 .TP
 .B \-C \fICOMMAND\fR, \fB\-\-command=\fICOMMAND
 Show only events for this command.
+
+.TP
+.B \-j\fR, \fB\-\-json
+Write events in JSONL format (see definition above).
 
 .TP
 .B \-h \fR, \fB\-\-help
