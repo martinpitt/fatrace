@@ -1,0 +1,9 @@
+#!/usr/bin/python3
+
+# Minimal tail replacement for use in tests.
+# By not exiting immediately, fatrace is able to gather metadata
+
+import os, sys, time
+with open(sys.argv[1], 'r') as f:
+    print(*f.read().splitlines(True)[-10:], sep='', end='')
+time.sleep(.1)

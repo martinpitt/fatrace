@@ -1,0 +1,42 @@
+#!/bin/sh
+set -euC
+
+mkdir -m 777 tmp
+trap "rm -rf tmp" EXIT INT QUIT PIPE
+
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
+echo "starting fatrace --command touch..."
+fatrace --current-mount --command touch -s 2 -o $LOG --json &
+sleep 1
+
+echo "create files with different programs"
+touch tmp/includeme
+dd if=/dev/zero of=tmp/notme bs=1 count=1
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+check_log() {
+    jq -e "select($1)" < $LOG > /dev/null
+}
+
+tmp="$(pwd)/tmp"
+check_log '.path=="'"$tmp/includeme"'"'
+
+if jq < $LOG -e 'select(.path=="'"$tmp/notme"'")' >/dev/null; then
+    echo "notme found in log" >&2
+    exit 1
+fi
+
+# exceeds TASK_COMM_LEN
+rm $LOG
+cp $(which touch) tmp/VeryLongTouchCommand
+echo "starting fatrace --command VeryLongTouchCommand..."
+fatrace --current-mount --command VeryLongTouchCommand -s 2 -o $LOG --json &
+sleep 1
+tmp/VeryLongTouchCommand tmp/hello.txt
+echo "waiting for fatrace..."
+wait
+
+check_log '.comm=="VeryLongTouchCo" and .path=="'"$tmp/hello.txt"'"'

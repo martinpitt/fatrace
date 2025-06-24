@@ -1,0 +1,8 @@
+#!/usr/bin/python3
+
+# Minimal touch replacement for use in tests.
+# By not exiting immediately, fatrace is able to gather metadata
+
+import os, sys, time
+with open(sys.argv[1], "a") as f: f.write(" ")
+time.sleep(.1)

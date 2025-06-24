@@ -67,6 +67,7 @@ static int option_user = 0;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
+static int option_json = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -225,6 +226,77 @@ show_pid (pid_t pid)
     return true;
 }
 
+/* if str is a valid UTF-8 string without need of any JSON escaping, return the
+   byte length, otherwise -1. */
+static inline int
+nonfunny_utf8_len (const char* str) {
+    const unsigned char* s = (unsigned char*)str;
+    int i = 0;
+    while (str[i] != 0) {
+        unsigned char c = s[i];
+        // Unescaped ASCII
+        if (0x20 <= c && c != '"' && c != '\\' && c <= 0x7e) {
+            i++; continue;
+        }
+        // it's ok to read s[i+1] since we know s[i] != 0
+        uint32_t mbc = c<<8 | s[i+1];
+        if (// 2-char: 110xxxxx 10xxxxxx
+            (mbc & 0xe0c0) == 0xc080 &&
+            // but not 1100000x 10xxxxxx (overlong)
+            (mbc & 0xfec0) != 0xc080) {
+            i+=2; continue;
+        }
+        if (s[i+1] == 0)
+            return -1;
+        // it's ok to read s[i+2] since we know s[i+1] != 0
+        mbc = mbc<<8 | s[i+2];
+        if (// 3-char: 1110xxxx 10xxxxxx 10xxxxxx
+            (mbc & 0xf0c0c0) == 0xe08080 &&
+            // but not 11100000 100xxxxx 10xxxxxx (overlong)
+            (mbc & 0xffe0c0) != 0xe08080 &&
+            // neither 11101101 101xxxxx 10xxxxxx (reserved for surrogates)
+            (mbc & 0xffe0c0) != 0xeda080) {
+            i+=3; continue;
+        }
+        if (s[i+2] == 0)
+            return -1;
+        // it's ok to read s[i+3] since we know s[i+2] != 0
+        mbc = mbc<<8 | s[i+3];
+        if (// 4-char: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+            (mbc & 0xf8c0c0c0) == 0xf0808080 &&
+            // but not 11110000 1000xxxx 10xxxxxx 10xxxxxx (overlong)
+            (mbc & 0xfff0c0c0) != 0xf0808080 &&
+            // neither 11110PPP 10PPxxxx 10xxxxxx 10xxxxxx, PPPPP>0x10 (too big)
+            (mbc & 0x07300000) <= 0x04000000) {
+            i+=4; continue;
+        }
+        return -1;
+    }
+    return i;
+}
+
+static void
+print_json_str (const char* key, const char* value) {
+    int value_len = nonfunny_utf8_len (value);
+    int key_len = strlen(key);
+    if (value_len >= 0) {
+        putchar('"');
+        fwrite (key, 1, key_len, stdout);
+        putchar('"');
+        putchar(':');
+        putchar('"');
+        fwrite (value, 1, value_len, stdout);
+        putchar ('"');
+    } else {
+        putchar('"');
+        fwrite (key, 1, key_len, stdout);
+        fwrite ("_raw\":[", 1, 7, stdout);
+        for (int i = 0; value[i] != 0; i++)
+            printf (i ? ",%d" : "%d", (unsigned int)(unsigned char)(value[i]));
+        putchar (']');
+    }
+}
+
 /**
  * print_event:
  *
@@ -300,21 +372,27 @@ print_event (const struct fanotify_event_metadata *data,
         event_fd = get_fid_event_fd (data);
 #endif
 
+    bool got_path = false;
+    struct stat st = { .st_uid = -1 };
     if (event_fd >= 0) {
+        if (option_json && fstat (event_fd, &st) < 0)
+            warn ("stat");
         /* try to figure out the path name */
         snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", event_fd);
         ssize_t len = readlink (printbuf, pathname, sizeof (pathname));
-        if (len < 0) {
+        if (len >= 0) {
+            pathname[len] = '\0';
+            got_path = true;
+        } else if (option_json) {
+          // no fallback, device/inode will always be printed
+        } else {
             /* fall back to the device/inode */
-            struct stat st;
-            if (fstat(event_fd, &st) < 0) {
+            if (fstat (event_fd, &st) < 0) {
                 warn ("stat");
                 pathname[0] = '\0';
             } else {
                 snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
             }
-        } else {
-            pathname[len] = '\0';
         }
 
         close (event_fd);
@@ -322,21 +400,43 @@ print_event (const struct fanotify_event_metadata *data,
         snprintf (pathname, sizeof (pathname), "(deleted)");
     }
 
+    if (option_json)
+        putchar('{');
+
     /* print event */
     if (option_timestamp == 1) {
         strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time->tv_sec));
-        printf ("%s.%06li ", printbuf, event_time->tv_usec);
+        printf (option_json ? "\"timestamp\":\"%s.%06li\"," : "%s.%06li ", printbuf, event_time->tv_usec);
     } else if (option_timestamp == 2) {
-        printf ("%li.%06li ", event_time->tv_sec, event_time->tv_usec);
+        printf (option_json ? "\"timestamp\":%li.%06li," : "%li.%06li ", event_time->tv_sec, event_time->tv_usec);
     }
 
     /* print user and group */
     if (option_user && proc_fd_stat.st_uid != (uid_t)-1)
-        snprintf(printbuf, sizeof printbuf, " [%u:%u]", proc_fd_stat.st_uid, proc_fd_stat.st_gid);
+        snprintf(printbuf, sizeof printbuf,
+                 option_json ? "\"uid\":%u,\"gid\":%u," : " [%u:%u]",
+                 proc_fd_stat.st_uid, proc_fd_stat.st_gid);
     else
         printbuf[0] = '\0';
 
-    printf ("%s(%i)%s: %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+    if (option_json) {
+        if (procname_pid >= 0) {
+            print_json_str("comm", procname);
+            putchar(',');
+        }
+        printf ("\"pid\":%i,%s\"types\":\"%s\"",
+                data->pid, printbuf, mask2str (data->mask));
+        if (st.st_uid != (uid_t)-1)
+            printf(",\"device\":{\"major\":%i,\"minor\":%i},\"inode\":%ld"
+                   , major (st.st_dev), minor (st.st_dev), st.st_ino);
+        if (got_path) {
+            putchar(',');
+            print_json_str("path", pathname);
+        }
+        printf("}\n");
+    } else {
+        printf ("%s(%i)%s: %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+    }
 }
 
 static void
@@ -444,6 +544,7 @@ help (void)
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, W, +, D, < or >, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
+"  -j, --json\t\t\tWrite events in JSONL format.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -469,12 +570,13 @@ parse_args (int argc, char** argv)
         {"ignore-pid",    required_argument, 0, 'p'},
         {"filter",        required_argument, 0, 'f'},
         {"command",       required_argument, 0, 'C'},
+        {"json",          no_argument,       0, 'j'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:h", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jh", long_options, NULL);
 
         if (c == -1)
             break;
@@ -559,6 +661,10 @@ parse_args (int argc, char** argv)
             case 't':
                 if (++option_timestamp > 2)
                     errx (EXIT_FAILURE, "Error: --timestamp option can be given at most two times");
+                break;
+
+            case 'j':
+                option_json = 1;
                 break;
 
             case 'h':

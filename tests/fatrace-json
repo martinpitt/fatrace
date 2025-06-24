@@ -1,0 +1,156 @@
+#!/bin/sh
+set -euC
+
+mkdir -m 777 tmp
+trap "rm -rf tmp" EXIT INT QUIT PIPE
+
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
+echo "starting fatrace..."
+fatrace --current-mount --user -s 10 -o $LOG --json &
+sleep 1
+
+# path
+touch "tmp/1-good.tmp"
+
+# path_raw
+touch "tmp/2-bad-$(printf '\001').tmp"
+
+# uid and gid
+runuser -u nobody touch "tmp/3-good.tmp"
+
+# pid
+bash -c 'echo $$ > '"tmp/4-pid"'; sleep .1;'
+
+# device and inode
+touch "tmp/5-good.tmp"
+
+# UTF-8
+utf8_test_cases() {
+    # escaped ASCII
+    $1 bad  "$(printf '\005')-tmp" # 0x05
+    $1 bad  "$(printf '\037')-tmp" # 0x1f
+    $1 good "$(printf '\040')-tmp" # 0x20 space
+    $1 good "$(printf '\041')-tmp" # 0x21 !
+    $1 bad  "$(printf '\042')-tmp" # 0x22 "
+    $1 good "$(printf '\043')-tmp" # 0x23 #
+    $1 good "$(printf '\133')-tmp" # 0x5b [
+    $1 bad  "$(printf '\134')-tmp" # 0x5c \
+    $1 good "$(printf '\135')-tmp" # 0x5b ]
+    $1 good "$(printf '\176')-tmp" # 0x7e ~
+    $1 bad  "$(printf '\177')-tmp" # 0x7f
+    # 2-char UTF-8
+    #U+0080
+    $1 good "$(printf '\302\200')-tmp" # U+0080 (unassigned but valid)
+    $1 good "$(printf '\303\205')-tmp" # U+00c5 Å
+    $1 bad  "$(printf '\303')-tmp"     # incomplete
+    $1 bad  "tmp-$(printf '\303')"     # incomplete at end
+    $1 bad  "$(printf '\301\277')-tmp" # overlong U+007f
+    $1 good "$(printf '\337\277')-tmp" # U+07ff ߿
+    # 3-char UTF-8
+    $1 bad  "$(printf '\340\237\277')-tmp" # overlong U+07ff
+    $1 good "$(printf '\340\240\200')-tmp" # U+0800 ࠀ
+    $1 good "$(printf '\340\257\265')-tmp" # U+0bf5 ௵
+    $1 bad  "$(printf '\340\257')-tmp"     # incomplete
+    $1 bad  "$(printf '\340')-tmp"         # incomplete
+    $1 bad  "tmp-$(printf '\340\257')"     # incomplete at end
+    $1 bad  "tmp-$(printf '\340')"         # incomplete at end
+    $1 good "$(printf '\355\237\277')-tmp" # U+d7ff (unassigned but valid)
+    $1 bad  "$(printf '\355\240\200')-tmp" # surrogate U+d800
+    $1 bad  "$(printf '\355\241\266')-tmp" # surrogate U+d876
+    $1 bad  "$(printf '\355\277\277')-tmp" # surrogate U+dfff
+    $1 good "$(printf '\356\200\200')-tmp" # U+e000 (unassigned but valid)
+    $1 good "$(printf '\357\277\277')-tmp" # U+ffff (unassigned but valid)
+    # 4-char UTF-8
+    $1 good "$(printf '\360\220\200\200')-tmp" # U+10000 𐀀
+    $1 good "$(printf '\360\237\200\205')-tmp" # U+1f005 🀅
+    $1 bad  "$(printf '\360\237\200')-tmp"     # incomplete
+    $1 bad  "$(printf '\360\237')-tmp"         # incomplete
+    $1 bad  "$(printf '\360')-tmp"             # incomplete
+    $1 bad  "tmp-$(printf '\360\237\200')"     # incomplete at end
+    $1 bad  "tmp-$(printf '\360\237')"         # incomplete at end
+    $1 bad  "tmp-$(printf '\360')"             # incomplete at end
+    $1 bad  "$(printf '\340\217\277\277')-tmp" # overlong U+ffff
+    $1 good "$(printf '\364\217\277\277')-tmp" # U+10ffff (unassigned but valid)
+    $1 bad  "$(printf '\364\220\200\200')-tmp" # U+110000 (too big)
+    # continuation bytes
+    $1 bad  "$(printf '\200')-tmp" # 0x80
+    $1 bad  "$(printf '\277')-tmp" # 0xbf
+}
+run_utf8_test() { touch "tmp/utf8-$1-$2"; }
+utf8_test_cases run_utf8_test
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+check_log() {
+    select_expr="$1"
+    shift
+    jq -e "select($select_expr)" "$@" < $LOG > /dev/null
+}
+check_log_absence() {
+    if check_log "$@"; then
+        return 1
+    else
+        if [ "$?" = 4 ]; then
+            return 0
+        fi
+        return 1
+    fi
+}
+
+tmp="$(realpath tmp)"
+
+# path
+check_log '.comm=="touch" and .path=="'"$tmp/1-good.tmp"'"'
+
+str_to_byte_array() {
+    echo -n '['
+    echo -n "$1" | od -An -v -t u1 | tr -s ' \n' , | sed 's/^,//;s/,$//'
+    echo -n ']'
+}
+
+# path_raw
+check_log '.comm=="touch" and .path_raw==$pathraw' \
+          --argjson pathraw "$(str_to_byte_array "$tmp/2-bad-$(printf '\001').tmp")"
+
+# uid and gid
+check_log '.comm=="touch" and .uid==$uid and .gid==$gid and .path==$path' \
+          --argjson uid "$(id -u nobody)" \
+          --argjson gid "$(id -g nobody)" \
+          --arg path "$tmp/3-good.tmp"
+
+# pid
+check_log '.comm=="bash" and .pid==$pid and .path==$path' \
+          --argjson pid "$(cat "$tmp/4-pid")" \
+          --arg path "$tmp/4-pid"
+
+# device and inode
+check_log '.comm=="touch" and .path==$path and .device==$device and .inode==$inode' \
+          --arg path "$tmp/5-good.tmp" \
+          --argjson device "$(stat -c '{"major":%Hd,"minor":%Ld}' "$tmp/5-good.tmp")" \
+          --argjson inode "$(stat -c %i "$tmp/5-good.tmp")"
+
+# UTF-8
+check_utf8_test() {
+    file="$tmp/utf8-$1-$2"
+    if [ "$1" = good ]; then
+        check_log '.comm=="touch" and .path==$path' \
+                  --arg path "$file"
+        check_log_absence '.path_raw==$pathraw' \
+                          --argjson pathraw "$(str_to_byte_array "$file")"
+    elif [ $1 = bad ]; then
+        check_log_absence '.path==$file' \
+                          --arg file "$file"
+        check_log '.comm=="touch" and .path_raw==$pathraw' \
+                  --argjson pathraw "$(str_to_byte_array "$file")"
+    else
+        echo "Bug in test case: $1 $2" >&2
+        exit 1
+    fi
+}
+utf8_test_cases check_utf8_test
+
+# Property tests
+check_log_absence '(.|has("path")) and (.|has("path_raw"))'
+check_log_absence '(.|has("comm")) and (.|has("comm_raw"))'
