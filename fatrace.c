@@ -68,6 +68,7 @@ static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
 static int option_json = 0;
+static int option_ancestors = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -313,6 +314,9 @@ print_event (const struct fanotify_event_metadata *data,
     static char pathname[PATH_MAX];
     bool got_procname = false;
     struct stat proc_fd_stat = { .st_uid = -1 };
+    int ppid = 0;
+    bool got_ppid = false;
+    static char statbuf[4096];
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
@@ -323,6 +327,15 @@ print_event (const struct fanotify_event_metadata *data,
     snprintf (printbuf, sizeof (printbuf), "/proc/%i", data->pid);
     int proc_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
+        /* get ppid */
+        if (option_ancestors) {
+            int ppid_fd = openat (proc_fd, "stat", O_RDONLY);
+            ssize_t len = read (ppid_fd, statbuf, sizeof (statbuf));
+            close (ppid_fd);
+            if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ppid) == 1)
+                got_ppid = true;
+        }
+
         /* read process name */
         int procname_fd = openat (proc_fd, "comm", O_RDONLY);
         ssize_t len = read (procname_fd, procname, sizeof (procname));
@@ -433,10 +446,52 @@ print_event (const struct fanotify_event_metadata *data,
             putchar(',');
             print_json_str("path", pathname);
         }
-        printf("}\n");
     } else {
-        printf ("%s(%i)%s: %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+        printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
     }
+    if (option_ancestors && got_ppid) {
+        printf(option_json ? ",\"ancestors\":" : ", ancestors");
+        char sep = option_json ? '[' : '=';
+        while (ppid) {
+            printf(option_json ? "%c{\"pid\":%i" : "%c(pid=%i", sep, ppid);
+            sep = ',';
+            snprintf (printbuf, sizeof (printbuf), "/proc/%i", ppid);
+            int ppid_dir_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
+            if (ppid_dir_fd >= 0) {
+                char p_procname[TASK_COMM_LEN];
+                int p_procname_fd = openat (ppid_dir_fd, "comm", O_RDONLY);
+                ssize_t len = read (p_procname_fd, p_procname, sizeof (p_procname));
+                close (p_procname_fd);
+                if (len >= 0) {
+                    while (len > 0 && p_procname[len-1] == '\n')
+                        len--;
+                    p_procname[len] = '\0';
+                    if (option_json) {
+                        putchar(',');
+                        print_json_str("comm", p_procname);
+                    } else
+                      printf(" comm=%s", p_procname);
+                }
+                /* get next parent */
+                if (ppid == 1)
+                    ppid = 0;
+                else {
+                    int p_stat_fd = openat (ppid_dir_fd, "stat", O_RDONLY);
+                    len = read (p_stat_fd, statbuf, sizeof (statbuf));
+                    close (p_stat_fd);
+                    if (len >= 0) {
+                        if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ppid) != 1) {
+                            ppid = 0; // stop here
+                        }
+                    }
+                }
+                close (ppid_dir_fd);
+            }
+            putchar(option_json ? '}' : ')');
+        }
+        if (option_json) putchar(']');
+    }
+    printf(option_json ? "}\n" : "\n");
 }
 
 static void
@@ -545,6 +600,7 @@ help (void)
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, W, +, D, < or >, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
+"  -a, --ancestors\t\tInclude information about parent processes.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -571,12 +627,13 @@ parse_args (int argc, char** argv)
         {"filter",        required_argument, 0, 'f'},
         {"command",       required_argument, 0, 'C'},
         {"json",          no_argument,       0, 'j'},
+        {"ancestors",     no_argument,       0, 'a'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jh", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jah", long_options, NULL);
 
         if (c == -1)
             break;
@@ -665,6 +722,10 @@ parse_args (int argc, char** argv)
 
             case 'j':
                 option_json = 1;
+                break;
+
+            case 'a':
+                option_ancestors = 1;
                 break;
 
             case 'h':
