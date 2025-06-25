@@ -193,6 +193,11 @@ Show only events for this command.
 Write events in JSONL format (see definition above).
 
 .TP
+.B \-i\fR, \fB\-\-inclusive
+Include possible false negatives, i.e. events where missing data makes filtering ambiguous.
+If \fB\-\-command\fR is specified, events with unknown command will be printed.
+
+.TP
 .B \-h \fR, \fB\-\-help
 Print help and exit.
 

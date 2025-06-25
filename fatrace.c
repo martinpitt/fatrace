@@ -68,6 +68,7 @@ static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
 static int option_json = 0;
+static int option_inclusive = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -377,7 +378,8 @@ print_event (const struct fanotify_event_metadata *data,
         }
     }
 
-    if (option_comm && strcmp (option_comm, procname) != 0) {
+    if (option_comm && strcmp (option_comm, procname) != 0 &&
+        (!option_inclusive || procname[0] != '\0')) {
         if (event_fd >= 0)
             close (event_fd);
         return;
@@ -570,6 +572,7 @@ help (void)
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, W, +, D, < or >, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
+"  -i, --inclusive\t\tInclude events where missing data makes filtering ambiguous.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -596,12 +599,13 @@ parse_args (int argc, char** argv)
         {"filter",        required_argument, 0, 'f'},
         {"command",       required_argument, 0, 'C'},
         {"json",          no_argument,       0, 'j'},
+        {"inclusive",     no_argument,       0, 'i'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jh", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jih", long_options, NULL);
 
         if (c == -1)
             break;
@@ -690,6 +694,10 @@ parse_args (int argc, char** argv)
 
             case 'j':
                 option_json = 1;
+                break;
+
+            case 'i':
+                option_inclusive = 1;
                 break;
 
             case 'h':
