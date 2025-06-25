@@ -75,6 +75,13 @@ prints the devices' major and minor number and the inode number. To examine
 such a process in more detail, you should consider using
 .BR strace (1).
 
+.IP \(bu 2
+Parent process information, if you specify the \fB\-\-parents\fR option and
+the parent process ID can be determined. This information includes, for each
+successive parent process, the process ID and, if it can be determined, the
+process name. If the last item in the list does not have process ID 1, then the
+information is incomplete.
+
 .RE
 
 In JSONL format, the line is a JSON-encoded object with the following fields:
@@ -138,6 +145,13 @@ The path to the affected file, if it can be determined.
 .B path_raw
 The raw bytes of the path to the affected file, in case it is invalid UTF-8 or would require escaping.
 
+.TP
+.B parents
+An array of parent processes, if you specify the \fB\-\-parents\fR option and
+the parent process ID can be determined. Each item is an object containing
+\fBpid\fR, \fBcomm\fR and \fBcomm_raw\fR fields as appropriate. If the last item
+in the list does not have process ID 1, then the information is incomplete.
+
 .SH OPTIONS
 
 .TP
@@ -187,6 +201,10 @@ Show only events for this command.
 .TP
 .B \-j\fR, \fB\-\-json
 Write events in JSONL format (see definition above).
+
+.TP
+.B \-P\fR, \fB\-\-parents
+Print information about all parent processes.
 
 .TP
 .B \-h \fR, \fB\-\-help
