@@ -69,6 +69,7 @@ static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
 static int option_json = 0;
 static int option_inclusive = 0;
+static int option_ancestors = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -316,7 +317,7 @@ static void
 print_event (const struct fanotify_event_metadata *data,
              const struct timeval *event_time)
 {
-    const char* problems[7];
+    const char* problems[14];
     int problem_idx = 0;
     int event_fd = data->fd;
     static char printbuf[100];
@@ -325,6 +326,9 @@ print_event (const struct fanotify_event_metadata *data,
     static char pathname[PATH_MAX];
     bool got_procname = false;
     struct stat proc_fd_stat = { .st_uid = -1 };
+    int ppid = 0;
+    bool got_ppid = false;
+    static char statbuf[4096];
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
@@ -335,6 +339,17 @@ print_event (const struct fanotify_event_metadata *data,
     snprintf (printbuf, sizeof (printbuf), "/proc/%i", data->pid);
     int proc_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
+        /* get ppid */
+        if (option_ancestors) {
+            int ppid_fd = openat (proc_fd, "stat", O_RDONLY);
+            ssize_t len = read (ppid_fd, statbuf, sizeof (statbuf));
+            close (ppid_fd);
+            if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ppid) == 1)
+                got_ppid = true;
+            else
+                problems[problem_idx++] = "Could not read /proc/PID/stat, cannot determine any ancestors.";
+        }
+
         /* read process name */
         int procname_fd = openat (proc_fd, "comm", O_RDONLY);
         ssize_t len = read (procname_fd, procname, sizeof (procname));
@@ -454,16 +469,71 @@ print_event (const struct fanotify_event_metadata *data,
                 problems[problem_idx++] = "path contains invalid UTF-8, path_raw contains the bytes.";
             }
         }
-        if (problem_idx) {
-          for (int i = 0; i < problem_idx; i++) {
-            printf("%s%s", i ? "\",\"" : ",\"problems\":[\"", problems[i]);
-          }
-          printf("\"]");
-        }
-        printf("}\n");
     } else {
-        printf ("%s(%i)%s: %-3s %s\n", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+        printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
     }
+    if (option_ancestors && got_ppid) {
+        printf(option_json ? ",\"ancestors\":" : ", ancestors");
+        char sep = option_json ? '[' : '=';
+        bool problem_p_comm_not_found = false;
+        bool problem_p_comm_raw = false;
+        while (ppid) {
+            printf(option_json ? "%c{\"pid\":%i" : "%c(pid=%i", sep, ppid);
+            sep = ',';
+            snprintf (printbuf, sizeof (printbuf), "/proc/%i", ppid);
+            int ppid_dir_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
+            if (ppid_dir_fd >= 0) {
+                char p_procname[TASK_COMM_LEN];
+                int p_procname_fd = openat (ppid_dir_fd, "comm", O_RDONLY);
+                ssize_t len = read (p_procname_fd, p_procname, sizeof (p_procname));
+                close (p_procname_fd);
+                if (len >= 0) {
+                    while (len > 0 && p_procname[len-1] == '\n')
+                        len--;
+                    p_procname[len] = '\0';
+                    if (option_json) {
+                        putchar(',');
+                        if (print_json_str("comm", p_procname)) {
+                            if (!problem_p_comm_raw)
+                                problems[problem_idx++] = "In an ancestor, comm contains invalid UTF-8, comm_raw contains the bytes.";
+                            problem_p_comm_raw = true;
+                        }
+                    } else
+                      printf(" comm=%s", p_procname);
+                } else {
+                    if (!problem_p_comm_not_found)
+                        problems[problem_idx++] = "In an ancestor, failed to read /proc/PPID/comm, cannot determine comm.";
+                    problem_p_comm_not_found = true;
+                }
+                /* get next parent */
+                if (ppid == 1)
+                    ppid = 0;
+                else {
+                    int p_stat_fd = openat (ppid_dir_fd, "stat", O_RDONLY);
+                    len = read (p_stat_fd, statbuf, sizeof (statbuf));
+                    close (p_stat_fd);
+                    if (len >= 0) {
+                        if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ppid) != 1) {
+                            problems[problem_idx++] = "In an ancestor, could not parse /proc/PPID/stat, ancestors list is incomplete.";
+                            ppid = 0; // stop here
+                        }
+                    } else {
+                        problems[problem_idx++] = "Could not read all /proc/PPID/stat, ancestors list is incomplete.";
+                    }
+                }
+                close (ppid_dir_fd);
+            }
+            putchar(option_json ? '}' : ')');
+        }
+        if (option_json) putchar(']');
+    }
+    if (option_json && problem_idx) {
+      for (int i = 0; i < problem_idx; i++) {
+        printf("%s%s", i ? "\",\"" : ",\"problems\":[\"", problems[i]);
+      }
+      printf("\"]");
+    }
+    printf(option_json ? "}\n" : "\n");
 }
 
 static void
@@ -573,6 +643,7 @@ help (void)
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
 "  -i, --inclusive\t\tInclude events where missing data makes filtering ambiguous.\n"
+"  -a, --ancestors\t\tInclude information about parent processes.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -600,12 +671,13 @@ parse_args (int argc, char** argv)
         {"command",       required_argument, 0, 'C'},
         {"json",          no_argument,       0, 'j'},
         {"inclusive",     no_argument,       0, 'i'},
+        {"ancestors",     no_argument,       0, 'a'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jih", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jiah", long_options, NULL);
 
         if (c == -1)
             break;
@@ -698,6 +770,10 @@ parse_args (int argc, char** argv)
 
             case 'i':
                 option_inclusive = 1;
+                break;
+
+            case 'a':
+                option_ancestors = 1;
                 break;
 
             case 'h':
