@@ -546,7 +546,8 @@ parse_args (int argc, char** argv)
                 pid = strtol (optarg, &endptr, 10);
                 if (*endptr != '\0' || pid <= 0)
                     errx (EXIT_FAILURE, "Error: Invalid PID");
-                if (ignored_pids_len < sizeof (ignored_pids))
+                if (ignored_pids_len
+                    < (sizeof (ignored_pids) / sizeof (ignored_pids[0])))
                     ignored_pids[ignored_pids_len++] = pid;
                 else
                     errx (EXIT_FAILURE, "Error: Too many ignored PIDs");
