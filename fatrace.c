@@ -70,6 +70,7 @@ static char* option_comm = NULL;
 static int option_json = 0;
 static int option_inclusive = 0;
 static int option_ancestors = 0;
+static int option_exe = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -317,7 +318,7 @@ static void
 print_event (const struct fanotify_event_metadata *data,
              const struct timeval *event_time)
 {
-    const char* problems[14];
+    const char* problems[18];
     int problem_idx = 0;
     int event_fd = data->fd;
     static char printbuf[100];
@@ -325,6 +326,8 @@ print_event (const struct fanotify_event_metadata *data,
     static int procname_pid = -1;
     static char pathname[PATH_MAX];
     bool got_procname = false;
+    static char exepath[PATH_MAX];
+    bool got_exepath = false;
     struct stat proc_fd_stat = { .st_uid = -1 };
     int ppid = 0;
     bool got_ppid = false;
@@ -371,6 +374,18 @@ print_event (const struct fanotify_event_metadata *data,
             if (fstat (proc_fd, &proc_fd_stat) < 0) {
                 debug ("failed to stat /proc/%i: %m", data->pid);
                 problems[problem_idx++] = "Failed to stat /proc/PID, cannot determine uid or gid.";
+            }
+        }
+
+        /* get exe */
+        if (option_exe) {
+            ssize_t len = readlinkat (proc_fd, "exe", exepath, sizeof (exepath));
+            if (len >= 0) {
+                exepath[len] = '\0';
+                got_exepath = true;
+            } else {
+                debug ("failed to readlink /proc/%i/exe: %m", data->pid);
+                problems[problem_idx++] = "Failed to readlink /proc/PID/exe, cannot determine executable path.";
             }
         }
 
@@ -469,14 +484,23 @@ print_event (const struct fanotify_event_metadata *data,
                 problems[problem_idx++] = "path contains invalid UTF-8, path_raw contains the bytes.";
             }
         }
+        if (option_exe == 1 && got_exepath) {
+            putchar(',');
+            if (print_json_str("exe", exepath))
+                problems[problem_idx++] = "exe contains invalid UTF-8, exe_raw contains the bytes.";
+        }
     } else {
         printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+        if (option_exe == 1 && got_exepath)
+            printf (" exe=%s", exepath);
     }
     if (option_ancestors && got_ppid) {
         printf(option_json ? ",\"ancestors\":" : ", ancestors");
         char sep = option_json ? '[' : '=';
         bool problem_p_comm_not_found = false;
         bool problem_p_comm_raw = false;
+        bool problem_exe_not_found = false;
+        bool problem_exe_raw = false;
         while (ppid) {
             printf(option_json ? "%c{\"pid\":%i" : "%c(pid=%i", sep, ppid);
             sep = ',';
@@ -504,6 +528,25 @@ print_event (const struct fanotify_event_metadata *data,
                     if (!problem_p_comm_not_found)
                         problems[problem_idx++] = "In an ancestor, failed to read /proc/PPID/comm, cannot determine comm.";
                     problem_p_comm_not_found = true;
+                }
+                if (option_exe) {
+                    ssize_t len = readlinkat (ppid_dir_fd, "exe", exepath, sizeof (exepath));
+                    if (len >= 0) {
+                        exepath[len] = '\0';
+                        if (option_json) {
+                            putchar(',');
+                            if (print_json_str("exe", exepath)) {
+                                if (!problem_exe_raw)
+                                    problems[problem_idx++] = "In an ancestor, exe contains invalid UTF-8, exe_raw contains the bytes.";
+                                problem_exe_raw = true;
+                            }
+                        } else
+                          printf(" exe=%s", exepath);
+                    } else {
+                        if (!problem_exe_not_found)
+                            problems[problem_idx++] = "In an ancestor, failed to readlink /proc/PPID/exe, cannot determine executable path.";
+                        problem_exe_not_found = true;
+                    }
                 }
                 /* get next parent */
                 if (ppid == 1)
@@ -644,6 +687,7 @@ help (void)
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
 "  -i, --inclusive\t\tInclude events where missing data makes filtering ambiguous.\n"
 "  -a, --ancestors\t\tInclude information about parent processes.\n"
+"  -e, --exe\t\t\tAdd executable path to events.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -672,12 +716,13 @@ parse_args (int argc, char** argv)
         {"json",          no_argument,       0, 'j'},
         {"inclusive",     no_argument,       0, 'i'},
         {"ancestors",     no_argument,       0, 'a'},
+        {"exe",           no_argument,       0, 'e'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jiah", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jiaeh", long_options, NULL);
 
         if (c == -1)
             break;
@@ -774,6 +819,10 @@ parse_args (int argc, char** argv)
 
             case 'a':
                 option_ancestors = 1;
+                break;
+
+            case 'e':
+                option_exe = 1;
                 break;
 
             case 'h':
