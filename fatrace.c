@@ -69,6 +69,7 @@ static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
 static bool option_json = false;
 static bool option_parents = false;
+static bool option_exe = false;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -344,6 +345,8 @@ print_event (const struct fanotify_event_metadata *data,
     static int procname_pid = -1;
     static char pathname[PATH_MAX];
     bool got_procname = false;
+    static char exepath[PATH_MAX];
+    bool got_exepath = false;
     struct stat proc_fd_stat = { .st_uid = -1 };
     int ppid = 0;
 
@@ -370,6 +373,17 @@ print_event (const struct fanotify_event_metadata *data,
         if (option_user) {
             if (fstat (proc_fd, &proc_fd_stat) < 0)
                 debug ("failed to stat /proc/%i: %m", data->pid);
+        }
+
+        /* get exe */
+        if (option_exe) {
+            ssize_t len = readlinkat (proc_fd, "exe", exepath, sizeof (exepath));
+            if (len >= 0) {
+                exepath[len] = '\0';
+                got_exepath = true;
+            } else {
+                debug ("failed to readlink /proc/%i/exe: %m", data->pid);
+            }
         }
 
         close (proc_fd);
@@ -461,8 +475,14 @@ print_event (const struct fanotify_event_metadata *data,
             putchar(',');
             print_json_str("path", pathname);
         }
+        if (option_exe && got_exepath) {
+            putchar(',');
+            print_json_str("exe", exepath);
+        }
     } else {
         printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+        if (option_exe && got_exepath)
+            printf (" exe=%s", exepath);
     }
     if (option_parents && ppid) {
         printf(option_json ? ",\"parents\":" : ", parents");
@@ -480,6 +500,17 @@ print_event (const struct fanotify_event_metadata *data,
                         print_json_str("comm", p_procname);
                     } else
                       printf(" comm=%s", p_procname);
+                }
+                if (option_exe) {
+                    ssize_t len = readlinkat (ppid_dir_fd, "exe", exepath, sizeof (exepath) - 1);
+                    if (len >= 0) {
+                        exepath[len] = '\0';
+                        if (option_json) {
+                            putchar(',');
+                            print_json_str("exe", exepath);
+                        } else
+                          printf(" exe=%s", exepath);
+                    }
                 }
                 /* get next parent */
                 if (ppid == 1)
@@ -605,6 +636,7 @@ help (void)
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
 "  -P, --parents\t\tInclude information about all parent processes.\n"
+"  -e, --exe\t\t\tAdd executable path to events.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -632,12 +664,13 @@ parse_args (int argc, char** argv)
         {"command",       required_argument, 0, 'C'},
         {"json",          no_argument,       0, 'j'},
         {"parents",       no_argument,       0, 'P'},
+        {"exe",           no_argument,       0, 'e'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jPh", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jPeh", long_options, NULL);
 
         if (c == -1)
             break;
@@ -730,6 +763,10 @@ parse_args (int argc, char** argv)
 
             case 'P':
                 option_parents = true;
+                break;
+
+            case 'e':
+                option_exe = true;
                 break;
 
             case 'h':
