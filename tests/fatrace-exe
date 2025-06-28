@@ -1,0 +1,84 @@
+#!/bin/sh
+set -euC
+
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
+LOG_JSON="$AUTOPKGTEST_TMP/fatrace.log.json"
+echo "starting fatrace..."
+fatrace --current-mount --s 2 -o $LOG --parents --exe &
+fatrace --current-mount --s 2 -o $LOG_JSON --json --parents --exe &
+sleep 1
+
+export bashcmd='touch $AUTOPKGTEST_TMP/file.tmp; echo $$ > $AUTOPKGTEST_TMP/bash.pid;'
+export pythoncmd='
+import os,subprocess
+subprocess.run(["bash", "-c", os.environ["bashcmd"]])
+with open(f"{os.environ["AUTOPKGTEST_TMP"]}/python.pid", "w") as f: f.write(f"{os.getpid()}\n")
+'
+python3 -c "$pythoncmd"
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+RC=0
+check_log() {
+    if ! grep -q "$1" $LOG; then
+        echo "$1 not found in text log" >&2
+        RC=$((RC+1))
+    fi
+}
+RCJ=0
+check_log_json() {
+    select_expr="$1"
+    shift
+    if ! (set -x; jq -e "select($select_expr)" "$@" < $LOG_JSON > /dev/null); then
+        echo "Not found in JSON log" >&2
+        RCJ=$((RCJ+1))
+    fi
+}
+
+touch_exe="$(cat "$AUTOPKGTEST_TMP/touch.exe")"
+bash_pid="$(cat "$AUTOPKGTEST_TMP/bash.pid")"
+bash_exe="$(readlink -f "$(which bash)")"
+python_pid=$(cat "$AUTOPKGTEST_TMP/python.pid")
+python_exe="$(readlink -f "$(which python3)")"
+test_pid="$$"
+test_exe="$(readlink -f /proc/$$/exe)"
+init_comm="$(cat /proc/1/comm)"
+init_exe="$(readlink -f /proc/1/exe)"
+
+check_log "^touch([0-9]*): C\?WO\? $AUTOPKGTEST_TMP/file.tmp exe=$touch_exe, parents=(pid=$bash_pid comm=bash exe=$bash_exe),(pid=$python_pid comm=python3 exe=$python_exe),(pid=$test_pid comm=fatrace-exe exe=$test_exe),.*,(pid=1 comm=$init_comm exe=$init_exe)$"
+
+check_log_json '
+        .comm=="touch" and .path==$path and .exe==$touch_exe
+        and .parents[0]=={"pid":$bash_pid,"comm":"bash","exe":$bash_exe}
+        and .parents[1]=={"pid":$python_pid,"comm":"python3","exe":$python_exe}
+        and .parents[2]=={"pid":$test_pid,"comm":"fatrace-exe","exe":$test_exe}
+        and .parents[-1]=={"pid":1,"comm":$init_comm,"exe":$init_exe}
+    ' \
+    --arg path "$AUTOPKGTEST_TMP/file.tmp" \
+    --arg touch_exe "$touch_exe" \
+    --argjson bash_pid "$bash_pid" \
+    --arg bash_exe "$bash_exe" \
+    --argjson python_pid "$python_pid" \
+    --arg python_exe "$python_exe" \
+    --argjson test_pid $test_pid \
+    --arg test_exe "$test_exe" \
+    --arg init_comm "$init_comm" \
+    --arg init_exe "$init_exe"
+
+if [ $RC -ne 0 ]; then
+   echo "$RC checks failed -- text log:" >&2
+   echo "===================" >&2
+   cat $LOG >&2
+   echo "===================" >&2
+   exit $RC
+fi
+
+if [ $RCJ -ne 0 ]; then
+   echo "$RCJ checks failed -- JSON log:" >&2
+   echo "===================" >&2
+   cat $LOG_JSON >&2
+   echo "===================" >&2
+   exit $RCJ
+fi
