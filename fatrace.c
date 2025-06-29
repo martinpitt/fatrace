@@ -48,6 +48,9 @@
 
 #define BUFSIZE 256*1024
 
+/* Likely to be less than /proc/sys/fs/fanotify/max_user_marks */
+#define MAX_DIRS 4096
+
 /* https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html ; not defined in any include file */
 #ifndef TASK_COMM_LEN
 #define TASK_COMM_LEN 16
@@ -73,6 +76,8 @@ static char* option_comm = NULL;
 static bool option_json = false;
 static bool option_parents = false;
 static bool option_exe = false;
+static const char *option_dirs[MAX_DIRS];
+static unsigned int option_dirs_len = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -594,6 +599,26 @@ do_mark (int fan_fd, const char *dir, bool fatal)
 static void
 setup_fanotify (int fan_fd)
 {
+    if (option_dirs_len > 0) {
+        mark_mode = FAN_MARK_ADD;
+        char resolved[PATH_MAX];
+        struct stat st;
+        for (unsigned i = 0; i < option_dirs_len; i++) {
+            if (realpath(option_dirs[i], resolved) &&
+                stat(resolved, &st) == 0) {
+                if (S_ISDIR(st.st_mode))
+                    do_mark (fan_fd, resolved, false);
+                else
+                    errx(EXIT_FAILURE,
+                         "Not a directory: %s", option_dirs[i]);
+            }
+            else
+                err(EXIT_FAILURE,
+                    "Cannot resolve directory: %s", option_dirs[i]);
+        }
+        return;
+    }
+
     FILE* mounts;
     struct mntent* mount;
 
@@ -644,7 +669,7 @@ setup_fanotify (int fan_fd)
 static void
 help (void)
 {
-    puts ("Usage: fatrace [options...] \n"
+    puts ("Usage: fatrace [options...] [--] [DIR...]\n"
 "\n"
 "Options:\n"
 "  -c, --current-mount           Only record events on partition/mount of\n"
@@ -663,6 +688,10 @@ help (void)
 "  -j, --json                    Write events in JSONL format.\n"
 "  -P, --parents                 Include information about all parent processes.\n"
 "  -e, --exe                     Add executable path to events.\n"
+"  -d DIR, --dir=DIR             Show only events on files directly under this\n"
+"                                directory. NOT recursive. Can be specified\n"
+"                                multiple times. DIRs can also be specified at\n"
+"                                the end of the command line.\n"
 "  -h, --help                    Show help.");
 }
 
@@ -691,12 +720,13 @@ parse_args (int argc, char** argv)
         {"json",          no_argument,       0, 'j'},
         {"parents",       no_argument,       0, 'P'},
         {"exe",           no_argument,       0, 'e'},
+        {"dir",           required_argument, 0, 'd'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jPeh", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jPed:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -801,6 +831,13 @@ parse_args (int argc, char** argv)
                 option_exe = true;
                 break;
 
+            case 'd':
+                if (option_dirs_len >= MAX_DIRS)
+                    errx (EXIT_FAILURE, "Error: Too many --dir arguments"
+                          " (maximum is %d).", MAX_DIRS);
+                option_dirs[option_dirs_len++] = optarg;
+                break;
+
             case 'h':
                 help ();
                 exit (EXIT_SUCCESS);
@@ -813,6 +850,15 @@ parse_args (int argc, char** argv)
                 errx (EXIT_FAILURE, "Internal error: unexpected option '%c'", c);
         }
     }
+    for (int i = optind; i < argc; i++) {
+        if (option_dirs_len >= MAX_DIRS)
+            errx (EXIT_FAILURE, "Error: Too many --dir and DIR arguments"
+                  " (maximum is %d).", MAX_DIRS);
+        option_dirs[option_dirs_len++] = argv[i];
+    }
+    if (option_current_mount && option_dirs_len > 0)
+        errx (EXIT_FAILURE,
+              "Error: -c,--current-mount and -d,--dir are mutually exclusive.");
 }
 
 static void

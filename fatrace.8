@@ -1,4 +1,4 @@
-.TH fatrace 8 "August 20, 2020" "Martin Pitt"
+.TH fatrace 8 "September 5, 2025" "Martin Pitt"
 
 .SH NAME
 
@@ -10,6 +10,10 @@ fatrace \- report system wide file access events
 [
 .I OPTIONS
 ]
+[
+--
+]
+[ \fIDIR\fR... ]
 
 .SH DESCRIPTION
 
@@ -211,6 +215,27 @@ Print information about all parent processes.
 .TP
 .B \-e\fR, \fB\-\-exe
 Print executable path.
+
+.TP
+.B \-d \fIDIR\fR, \fB\-\-dir=\fIDIR\fR
+Show only events where the affected file is \fIdirectly\fR under this directory.
+Can be specified multiple times to include events from several directories.
+.IP
+This is \fInot\fR recursive. For example, \fB\-d /home/user\fR will show events
+for \fB/home/user/file\fR but not for \fB/home/user/subdir/file\fR.
+.IP
+\fIDIR\fRs can also be specified at the end of the command line, advisably
+preceded by the \fB\-\-\fR separator. As long as no directories will be created
+or moved under a subtree, it's possible to watch that subtree like so:
+.RS
+.IP "" 4
+fatrace -- $(find /path/to/subtree -type d)
+.RE
+.IP
+The attachment is to a directory inode, not the path. For example, this means
+that 1) If you move a watched directory while fatrace runs, you may receive
+events for a path that is not listed on the command line; 2) If you delete and
+recreate a watched directory you will no longer receive events.
 
 .TP
 .B \-h \fR, \fB\-\-help
