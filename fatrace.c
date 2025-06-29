@@ -42,6 +42,7 @@
 #include <sys/sysmacros.h>
 #include <sys/types.h>
 #include <ctype.h>
+#include <ftw.h>
 
 #define BUFSIZE 256*1024
 
@@ -71,6 +72,10 @@ static int option_json = 0;
 static int option_inclusive = 0;
 static int option_ancestors = 0;
 static int option_exe = 0;
+static const char *option_dirs[1024];
+static int option_dir_lens[1024];
+static int dir_watch_mode = 0;
+static unsigned int option_dirs_len = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -229,6 +234,30 @@ show_pid (pid_t pid)
     return true;
 }
 
+/**
+ * show_path:
+ *
+ * Check if events for given path should be logged.
+ *
+ * Returns: true if path is to be logged, false if not.
+ */
+static bool
+show_path (const char* path)
+{
+    if (option_dirs_len == 0) return true;
+    int plen = strlen(path);
+    for (unsigned int i = 0; i < option_dirs_len; i++) {
+        const char* compare_to_dir = option_dirs[i];
+        int compare_to_dir_len = option_dir_lens[i];
+        if (compare_to_dir_len <= plen &&
+            (path[compare_to_dir_len] == '\0' ||
+             path[compare_to_dir_len] == '/') &&
+            memcmp(path, compare_to_dir, compare_to_dir_len) == 0)
+            return true;
+    }
+    return false;
+}
+
 static bool
 print_json_str (const char* key, const char* value) {
     const unsigned char* str = (unsigned char*)value;
@@ -309,6 +338,9 @@ print_json_str (const char* key, const char* value) {
     return decode_problem;
 }
 
+static int mark_cb(const char *fpath, const struct stat*, int typeflag,
+                   struct FTW*);
+
 /**
  * print_event:
  *
@@ -324,6 +356,8 @@ print_event (const struct fanotify_event_metadata *data,
     static char printbuf[100];
     static char procname[TASK_COMM_LEN];
     static int procname_pid = -1;
+    static char procname2[TASK_COMM_LEN];
+    static int procname2_pid = -1;
     static char pathname[PATH_MAX];
     bool got_procname = false;
     static char exepath[PATH_MAX];
@@ -392,7 +426,6 @@ print_event (const struct fanotify_event_metadata *data,
         close (proc_fd);
     } else {
         debug ("failed to open /proc/%i: %m", data->pid);
-        procname[0] = '\0';
         problems[problem_idx++] = "Failed to open /proc/PID, cannot read any process metadata.";
     }
 
@@ -401,15 +434,20 @@ print_event (const struct fanotify_event_metadata *data,
         if (data->pid == procname_pid) {
             debug ("re-using cached procname value %s for pid %i", procname, procname_pid);
             problems[problem_idx++] = "However, cached comm is usable.";
-        } else if (procname_pid >= 0) {
-            debug ("invalidating previously cached procname %s for pid %i", procname, procname_pid);
-            procname_pid = -1;
-            procname[0] = '\0';
+            got_procname = true;
+        } else if (data->pid == procname2_pid) {
+            debug ("re-using cached procname2 value %s for pid %i", procname2, procname2_pid);
+            problems[problem_idx++] = "However, cached comm 2 is usable.";
+            procname_pid = procname2_pid;
+            memcpy (procname, procname2, sizeof (procname));
+            got_procname = true;
         }
     }
 
-    if (option_comm && strcmp (option_comm, procname) != 0 &&
-        (!option_inclusive || procname[0] != '\0')) {
+    if (option_comm &&
+        (got_procname
+         ? strcmp (option_comm, procname) != 0
+         : !option_inclusive)) {
         if (event_fd >= 0)
             close (event_fd);
         return;
@@ -449,6 +487,26 @@ print_event (const struct fanotify_event_metadata *data,
         problems[problem_idx++] = "Event deleted, cannot determine path.";
     }
 
+    if (dir_watch_mode &&
+        (data->mask & FAN_ONDIR) != 0 &&
+        (data->mask & (FAN_CREATE |
+                       FAN_MOVED_TO |
+                       FAN_MOVE_SELF)) != 0) {
+        nftw(pathname, mark_cb, 32, FTW_PHYS);
+    }
+
+    if (option_dirs_len > 0 &&
+        (got_path ? !show_path(pathname) : !option_inclusive)) {
+        if (dir_watch_mode && (data->mask & FAN_ONDIR) != 0) {
+            nftw(pathname, mark_cb, 32, FTW_PHYS);
+        }
+        return;
+    }
+
+    /* event matches filters, copy procname cache 1 to cache 2 */
+    procname2_pid = procname_pid;
+    memcpy (procname2, procname, sizeof (procname));
+
     /* print event */
     if (option_timestamp == 1) {
         strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time->tv_sec));
@@ -467,7 +525,7 @@ print_event (const struct fanotify_event_metadata *data,
 
     if (option_json) {
         putchar(option_timestamp ? ',' : '{');
-        if (procname_pid >= 0) {
+        if (got_procname) {
             if (print_json_str("comm", procname)) {
                 problems[problem_idx++] = "comm contains invalid UTF-8, comm_raw contains the bytes.";
             }
@@ -490,7 +548,7 @@ print_event (const struct fanotify_event_metadata *data,
                 problems[problem_idx++] = "exe contains invalid UTF-8, exe_raw contains the bytes.";
         }
     } else {
-        printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
+        printf ("%s(%i)%s: %-3s %s", got_procname ? procname : "unknown", data->pid, printbuf, mask2str (data->mask), pathname);
         if (option_exe == 1 && got_exepath)
             printf (" exe=%s", exepath);
     }
@@ -590,6 +648,18 @@ do_mark (int fan_fd, const char *dir, bool fatal)
         mask |= FAN_CREATE | FAN_DELETE | FAN_MOVE;
 #endif
 
+    if (dir_watch_mode && !show_path(dir)) {
+        res = fanotify_mark (fan_fd, FAN_MARK_REMOVE, 0, AT_FDCWD, dir);
+        if (res < 0)
+        {
+            if (fatal)
+                err (EXIT_FAILURE, "Failed to remove watch for %s", dir);
+            else
+                warn ("Failed to remove watch for %s", dir);
+        }
+        return;
+    }
+
     res = fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir);
 
 #ifdef FAN_MARK_FILESYSTEM
@@ -612,6 +682,25 @@ do_mark (int fan_fd, const char *dir, bool fatal)
     }
 }
 
+/* helpers for marking directories */
+#define DIR_MARK_LIMIT 4096
+static int count_cb_dir_count = 0; // global var used to pass an argument.
+static int count_cb(const char *, const struct stat*, int typeflag, struct FTW*)
+{
+    if (typeflag == FTW_D) count_cb_dir_count++;
+    if (count_cb_dir_count > DIR_MARK_LIMIT) return 1;
+    return 0;
+}
+static int mark_cb_fanfd = 0; // global var used to pass an argument.
+static int mark_cb(const char *fpath, const struct stat*, int typeflag,
+                   struct FTW*)
+{
+  if (typeflag == FTW_D) {
+      do_mark (mark_cb_fanfd, fpath, false);
+  }
+  return 0;
+}
+
 /**
  * setup_fanotify:
  *
@@ -623,6 +712,26 @@ do_mark (int fan_fd, const char *dir, bool fatal)
 static void
 setup_fanotify (int fan_fd)
 {
+    count_cb_dir_count = 0;
+    if (option_dirs_len > 0) {
+        for (unsigned i = 0; i < option_dirs_len; i++) {
+            nftw(option_dirs[i], count_cb, 32, FTW_PHYS);
+            if (count_cb_dir_count > DIR_MARK_LIMIT) break;
+        }
+        if (count_cb_dir_count <= DIR_MARK_LIMIT) {
+            dir_watch_mode = 1;
+            mark_mode = FAN_MARK_ADD;
+            mark_cb_fanfd = fan_fd;
+            for (unsigned i = 0; i < option_dirs_len; i++) {
+                nftw(option_dirs[i], mark_cb, 32, FTW_PHYS);
+            }
+            return;
+        } else {
+            warnx ("Directories are too many to watch separately. Watching all"
+                   " files instead.");
+        }
+    }
+
     FILE* mounts;
     struct mntent* mount;
 
@@ -688,6 +797,7 @@ help (void)
 "  -i, --inclusive\t\tInclude events where missing data makes filtering ambiguous.\n"
 "  -a, --ancestors\t\tInclude information about parent processes.\n"
 "  -e, --exe\t\t\tAdd executable path to events.\n"
+"  -d, --dir\t\t\tShow only events on files under this directory. Can be specified multiple times.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -717,12 +827,13 @@ parse_args (int argc, char** argv)
         {"inclusive",     no_argument,       0, 'i'},
         {"ancestors",     no_argument,       0, 'a'},
         {"exe",           no_argument,       0, 'e'},
+        {"dir",           no_argument,       0, 'd'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
 
     while (1) {
-        c = getopt_long (argc, argv, "C:co:s:tup:f:jiaeh", long_options, NULL);
+        c = getopt_long (argc, argv, "C:co:s:tup:f:jiaed:h", long_options, NULL);
 
         if (c == -1)
             break;
@@ -776,8 +887,10 @@ parse_args (int argc, char** argv)
                             option_filter_mask |= FAN_DELETE;
                             break;
                         case '<':
+                            option_filter_mask |= FAN_MOVED_FROM;
+                            break;
                         case '>':
-                            option_filter_mask |= FAN_MOVE;
+                            option_filter_mask |= FAN_MOVED_TO;
                             break;
 #endif
                         default:
@@ -825,6 +938,45 @@ parse_args (int argc, char** argv)
                 option_exe = 1;
                 break;
 
+            case 'd':
+                if (option_dirs_len
+                    < (sizeof (option_dirs) / sizeof (option_dirs[0]))) {
+                    const char* path = optarg;
+                    int plen = strlen(path);
+                    if (plen == 0)
+                        errx (EXIT_FAILURE, "Error: Empty dir given");
+                    if (plen >= PATH_MAX)
+                        errx (EXIT_FAILURE, "Error: Dir too long: %s", path);
+                    if (path[0] != '/')
+                        errx (EXIT_FAILURE, "Error: Dir must be absolute: %s",
+                              path);
+                    if (plen == 1)
+                        errx (EXIT_FAILURE,
+                              "Error: Dir must not be filesystem root. To"
+                              " include all dirs, instead remove all -d,--dir"
+                              " options.");
+                    if (path[plen - 1] == '/')
+                        errx (EXIT_FAILURE,
+                              "Error: Dir must not end with a slash: %s", path);
+                    for (int i = 0; i < plen - 1; i++)
+                        if (path[i] == '/' && path[i + 1] == '/')
+                            errx (EXIT_FAILURE,
+                                  "Error: Dir must not contain double slashes:"
+                                  " %s", path);
+                    // Check that dir exists
+                    int path_fd = open (path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+                    if (path_fd < 0) {
+                        err (EXIT_FAILURE, "Error: Cannot open dir %s", path);
+                    }
+                    close (path_fd);
+                    option_dirs[option_dirs_len] = path;
+                    option_dir_lens[option_dirs_len] = plen;
+                    option_dirs_len++;
+                }
+                else
+                    errx (EXIT_FAILURE, "Error: Too many dirs");
+                break;
+
             case 'h':
                 help ();
                 exit (EXIT_SUCCESS);
@@ -837,6 +989,9 @@ parse_args (int argc, char** argv)
                 errx (EXIT_FAILURE, "Internal error: unexpected option '%c'", c);
         }
     }
+    if (option_current_mount && option_dirs_len > 0)
+        errx (EXIT_FAILURE,
+              "Error: -c,--current-mount and -d,--dir are mutually exclusive.");
 }
 
 static void

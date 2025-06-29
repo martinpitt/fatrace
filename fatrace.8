@@ -200,9 +200,8 @@ Ignore events for this process ID. Can be specified multiple times.
 Show only the given event types.
 .B TYPES
 is a list of
-.BR C ", " R ", " O ", " W ", " D ", " + ", or " <
-with the above meanings. < and > both mean "move" and will always enable both
-directions.
+.BR C ", " R ", " O ", " W ", " D ", " + ", " < ", or " >
+with the above meanings.
 
 E. g. use
 .B \--filter=OC
@@ -220,6 +219,7 @@ Write events in JSONL format (see definition above).
 .B \-i\fR, \fB\-\-inclusive
 Include possible false negatives, i.e. events where missing data makes filtering ambiguous.
 If \fB\-\-command\fR is specified, events with unknown command will be printed.
+If \fB\-\-dir\fR is specified, events with unknown path will be printed.
 
 .TP
 .B \-a\fR, \fB\-\-ancestors
@@ -228,6 +228,13 @@ Print information about parents processes.
 .TP
 .B \-e\fR, \fB\-\-exe
 Print executable path.
+
+.TP
+.B \-d\fR, \fB\-\-dir
+Show only events where the affected file is under this path. Can be specified
+multiple times to include events from several paths. If the directories
+contained under these paths are sufficiently few (4096 or less), the events are
+filtered by the kernel.
 
 .TP
 .B \-h \fR, \fB\-\-help
