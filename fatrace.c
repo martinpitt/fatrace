@@ -439,7 +439,7 @@ help (void)
 "  -t, --timestamp\t\tAdd timestamp to events. Give twice for seconds since the epoch.\n"
 "  -u, --user\t\t\tAdd user ID and group ID to events.\n"
 "  -p PID, --ignore-pid PID\tIgnore events for this process ID. Can be specified multiple times.\n"
-"  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, or W, e. g. --filter=OC.\n"
+"  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, W, +, D, < or >, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -h, --help\t\t\tShow help.");
 }
