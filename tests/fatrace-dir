@@ -1,0 +1,161 @@
+#!/bin/sh
+set -euC
+
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
+LOG_JSON="$AUTOPKGTEST_TMP/fatrace.log.json"
+
+Touch() { echo '' >> "$1"; }
+
+RC=0
+check_log() {
+    if ! grep -q "$1" $LOG; then
+        echo "$1 not found in text log" >&2
+        RC=$((RC+1))
+    fi
+}
+check_log_absence() {
+    if grep -q "$1" $LOG; then
+        echo "$1 found in text log" >&2
+        RC=$((RC+1))
+    fi
+}
+RCJ=0
+check_log_json() {
+    select_expr="$1"
+    shift
+    if ! (set -x; jq -e "select($select_expr)" "$@" < $LOG_JSON > /dev/null); then
+        echo "Not found in JSON log" >&2
+        RCJ=$((RCJ+1))
+    fi
+}
+check_log_json_absence() {
+    select_expr="$1"
+    shift
+    if (set -x; jq -e "select($select_expr)" "$@" < $LOG_JSON > /dev/null); then
+        echo "Found in JSON log" >&2
+        RCJ=$((RCJ+1))
+    fi
+}
+check_rc() {
+    if [ $RC -ne 0 ]; then
+       echo "$RC checks failed -- text log:" >&2
+       echo "===================" >&2
+       cat "$LOG" >&2
+       echo "===================" >&2
+       exit $RC
+    fi
+    rm "$LOG"
+    if [ $RCJ -ne 0 ]; then
+       echo "$RCJ checks failed -- JSON log:" >&2
+       echo "===================" >&2
+       cat $LOG_JSON >&2
+       echo "===================" >&2
+       exit $RCJ
+    fi
+    rm "$LOG_JSON"
+}
+
+echo "===== Test directories with few sub-directories ====="
+
+mkdir "$AUTOPKGTEST_TMP/yes-1"
+mkdir "$AUTOPKGTEST_TMP/yes-2"
+mkdir "$AUTOPKGTEST_TMP/no-1"
+mkdir "$AUTOPKGTEST_TMP/no-2"
+
+echo "starting fatrace..."
+fatrace -s 2 -o $LOG --dir "$AUTOPKGTEST_TMP/yes-1" --dir "$AUTOPKGTEST_TMP/yes-2" &
+fatrace -s 2 -o $LOG_JSON --json --dir "$AUTOPKGTEST_TMP/yes-1" --dir "$AUTOPKGTEST_TMP/yes-2" &
+sleep 1
+
+mkdir "$AUTOPKGTEST_TMP/yes-1/sub"
+mkdir "$AUTOPKGTEST_TMP/yes-2/sub"
+mkdir "$AUTOPKGTEST_TMP/no-1/sub"
+mkdir "$AUTOPKGTEST_TMP/no-2/sub"
+
+Touch "$AUTOPKGTEST_TMP/yes-1/fileA"
+Touch "$AUTOPKGTEST_TMP/yes-1/sub/fileB"
+Touch "$AUTOPKGTEST_TMP/yes-2/fileC"
+Touch "$AUTOPKGTEST_TMP/yes-2/sub/fileD"
+Touch "$AUTOPKGTEST_TMP/no-1/fileE"
+Touch "$AUTOPKGTEST_TMP/no-1/sub/fileF"
+Touch "$AUTOPKGTEST_TMP/no-2/fileG"
+Touch "$AUTOPKGTEST_TMP/no-2/sub/fileH"
+
+mv "$AUTOPKGTEST_TMP/no-1/sub" "$AUTOPKGTEST_TMP/yes-1/sub_moved"
+mv "$AUTOPKGTEST_TMP/yes-1/sub" "$AUTOPKGTEST_TMP/no-1/sub_moved"
+
+Touch "$AUTOPKGTEST_TMP/yes-1/sub_moved/fileF"
+Touch "$AUTOPKGTEST_TMP/no-1/sub_moved/fileB"
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+
+shellcomm="$(cat /proc/$$/comm)"
+
+check_log "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/yes-1/fileA"
+check_log "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/yes-1/sub/fileB"
+check_log "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/yes-2/fileC"
+check_log "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/yes-2/sub/fileD"
+check_log "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/yes-1/sub_moved/fileF"
+check_log_absence "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/no-1/fileE"
+check_log_absence "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/no-1/sub/fileF"
+check_log_absence "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/no-2/fileG"
+check_log_absence "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/no-2/sub/fileH"
+check_log_absence "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/no-1/sub_moved/fileB"
+check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-1/fileA"
+check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-1/sub/fileB"
+check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-2/fileC"
+check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-2/sub/fileD"
+check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-1/sub_moved/fileF"
+check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-1/fileE"
+check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-1/sub/fileF"
+check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-2/fileG"
+check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-2/sub/fileH"
+check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-2/sub_moved/fileB"
+
+check_rc
+
+echo "===== Test directories with many sub-directories ====="
+
+mkdir "$AUTOPKGTEST_TMP/yes-many"
+mkdir "$AUTOPKGTEST_TMP/no-many"
+for a in $(seq 5000); do
+    $os_mkdir "$AUTOPKGTEST_TMP/yes-many/existing-dir-$a"
+    Touch "$AUTOPKGTEST_TMP/yes-many/existing-dir-$a/file"
+    $os_mkdir "$AUTOPKGTEST_TMP/no-many/existing-dir-$a"
+    Touch "$AUTOPKGTEST_TMP/no-many/existing-dir-$a/file"
+done
+
+echo "starting fatrace..."
+fatrace -s 2 -o $LOG --dir "$AUTOPKGTEST_TMP/yes-many" &
+fatrace -s 2 -o $LOG_JSON --json --dir "$AUTOPKGTEST_TMP/yes-many" &
+sleep 1
+
+for a in $(seq 50); do
+    Touch "$AUTOPKGTEST_TMP/yes-many/existing-dir-$a/file"
+    $os_mkdir "$AUTOPKGTEST_TMP/yes-many/new-dir-$a"
+    Touch "$AUTOPKGTEST_TMP/yes-many/new-dir-$a/file"
+    Touch "$AUTOPKGTEST_TMP/no-many/existing-dir-$a/file"
+    $os_mkdir "$AUTOPKGTEST_TMP/no-many/new-dir-$a"
+    Touch "$AUTOPKGTEST_TMP/no-many/new-dir-$a/file"
+done
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+
+for a in $(seq 50); do
+    check_log "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/yes-many/existing-dir-$a/file"
+    check_log "^$shellcomm([0-9]*): CW\?O\? \+$AUTOPKGTEST_TMP/yes-many/new-dir-$a/file"
+    check_log_absence "^$shellcomm([0-9]*): C\?WO\? \+$AUTOPKGTEST_TMP/no-many/existing-dir-$a/file"
+    check_log_absence "^$shellcomm([0-9]*): CW\?O\? \+$AUTOPKGTEST_TMP/no-many/new-dir-$a/file"
+    check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-many/existing-dir-$a/file"
+    check_log_json '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/yes-many/new-dir-$a/file"
+    check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-many/existing-dir-$a/file"
+    check_log_json_absence '.comm==$shell and .path==$path' --arg shell "$shellcomm" --arg path "$AUTOPKGTEST_TMP/no-many/new-dir-$a/file"
+done
+
+check_rc
