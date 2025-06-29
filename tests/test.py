@@ -72,18 +72,30 @@ class FatraceRunner:
             self.log_content = f.read()
         self.log_dir.cleanup()
 
-    def assert_log(self, pattern: str) -> None:
+    def has_log(self, pattern: str) -> bool:
         """Check if a regex pattern exists in the log content."""
 
         assert self.log_content, "Need to call run() first"
 
-        if not re.search(pattern, self.log_content, re.MULTILINE):
-            raise AssertionError(f"""Pattern not found in log: {pattern}
----- Log content ----
-{self.log_content}
------------------""")
+        return bool(re.search(pattern, self.log_content, re.MULTILINE))
 
-    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
+    def assert_log(self, pattern: str) -> None:
+        if self.has_log(pattern):
+            return
+        raise AssertionError(f"Pattern not found in log: {pattern}\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
+
+    def assert_not_log(self, pattern: str) -> None:
+        if not self.has_log(pattern):
+            return
+        raise AssertionError(f"Pattern found in log: {pattern}\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
+
+    def has_json(self, condition_func: Callable[[dict], bool]) -> bool:
         """Check if any JSON line matches the condition function."""
 
         assert self.log_content, "Need to call run() first"
@@ -94,16 +106,27 @@ class FatraceRunner:
             entry = json.loads(line)
             try:
                 if condition_func(entry):
-                    return
+                    return True
             except KeyError:
                 # Ignore entries that do not match the expected structure
                 pass
+        return False
 
-        raise AssertionError(f"""No JSON entry matched condition
----- Log content ----
-{self.log_content}
------------------""")
+    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
+        if self.has_json(condition_func):
+            return
+        raise AssertionError("No JSON entry matched condition\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
 
+    def assert_not_json(self, condition_func: Callable[[dict], bool]) -> None:
+        if not self.has_json(condition_func):
+            return
+        raise AssertionError("At least one JSON entry matched condition\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
 
 class FatraceTests(unittest.TestCase):
     def setUp(self):
@@ -573,6 +596,64 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
                     e["path_raw"] == filebytes and
                     "path" not in e
                 ))
+
+    def test_dir(self):
+        yes1 = str(self.tmp_path / "yes-1")
+        yes2 = str(self.tmp_path / "yes-2")
+        no1 = str(self.tmp_path / "no-1")
+
+        exe(["mkdir", yes1])
+        exe(["mkdir", yes2])
+        exe(["mkdir", no1])
+
+        f = FatraceRunner(["-s", "3", "-d", yes1, f"--dir={yes2}"])
+        f_json = FatraceRunner(["-s", "3", "--json", "--", yes1, yes2])
+
+        slow_exe(["mkdir", f"{yes1}/subA"])
+        slow_exe(["mkdir", f"{no1}/subB"])
+
+        slow_exe(["touch", f"{yes1}/yesC"])
+        slow_exe(["touch", f"{yes1}/subA/noD"])
+        slow_exe(["touch", f"{yes2}/yesE"])
+        slow_exe(["touch", f"{no1}/noF"])
+        slow_exe(["touch", f"{no1}/subB/noG"])
+
+        slow_exe(["mv", yes1, yes2])
+        new_yes1 = str(self.tmp_path / "yes-2" / "yes-1")
+        slow_exe(["mv", no1, yes2])
+        new_no1 = str(self.tmp_path / "yes-2" / "no-1")
+
+        slow_exe(["touch", f"{new_yes1}/yesH"])
+        slow_exe(["touch", f"{new_yes1}/subA/noI"])
+        slow_exe(["touch", f"{new_no1}/noJ"])
+        slow_exe(["touch", f"{new_no1}/subB/noK"])
+
+        f.finish()
+        f_json.finish()
+
+        f.assert_log    (rf"^mkdir\([0-9]*\): \+ +{re.escape(yes1)}")
+        f.assert_not_log(rf"^mkdir\([0-9]*\): \+ +{re.escape(no1)}")
+        f.assert_log    (rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/yesC")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/subA/noD")
+        f.assert_log    (rf"^touch\([0-9]*\): C?WO? +{re.escape(yes2)}/yesE")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/noF")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/subB/noG")
+        f.assert_log    (rf"^touch\([0-9]*\): C?WO? +{re.escape(new_yes1)}/yesH")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(new_yes1)}/subA/noI")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(new_no1)}/noJ")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(new_no1)}/subB/noK")
+
+        f_json.assert_json    (lambda e: e["comm"] == "mkdir" and e["types"] == "+" and e["path"] == yes1)
+        f_json.assert_not_json(lambda e: e["comm"] == "mkdir" and e["types"] == "+" and e["path"] == no1)
+        f_json.assert_json    (lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/yesC")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/subA/noD")
+        f_json.assert_json    (lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/yesE")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/noF")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/subB/noG")
+        f_json.assert_json    (lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_yes1}/yesH")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_yes1}/subA/noI")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_no1}/noJ")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{new_no1}/subB/noK")
 
     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
