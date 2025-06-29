@@ -307,9 +307,11 @@ print_event (const struct fanotify_event_metadata *data,
         if (len < 0) {
             /* fall back to the device/inode */
             struct stat st;
-            if (fstat (event_fd, &st) < 0)
-                err (EXIT_FAILURE, "stat");
-            snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
+            if (fstat(event_fd, &st) < 0) {
+                pathname[0] = '\0';
+            } else {
+                snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
+            }
         } else {
             pathname[len] = '\0';
         }
