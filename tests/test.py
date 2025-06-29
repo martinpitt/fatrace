@@ -56,9 +56,14 @@ class FatraceRunner:
         self.log_dir = tempfile.TemporaryDirectory()
         self.output_file = os.path.join(self.log_dir.name, "fatrace.log")
         self.log_content: str | None = None
+        self.stderr_content: str | None = None
 
         fatrace_bin = "fatrace" if os.getenv("FATRACE_INSTALLED_TEST") else str(ROOTDIR / "fatrace")
-        self.process = subprocess.Popen([fatrace_bin, "-o", str(self.output_file)] + args)
+        self.process = subprocess.Popen(
+            [fatrace_bin, "-o", str(self.output_file)] + args,
+            stdout = subprocess.PIPE,
+            stderr = subprocess.PIPE,
+            text = True)
         # wait until fatrace starts
         while not os.path.exists(self.output_file):
             time.sleep(0.1)
@@ -68,22 +73,37 @@ class FatraceRunner:
 
         # fallback timeout; tests should use -s
         self.process.wait(timeout=10)
+        out, err = self.process.communicate()
+        assert out == ""
         with open(self.output_file, 'r') as f:
             self.log_content = f.read()
+        self.stderr_content = err
         self.log_dir.cleanup()
 
-    def assert_log(self, pattern: str) -> None:
+    def has_log(self, pattern: str) -> bool:
         """Check if a regex pattern exists in the log content."""
 
         assert self.log_content, "Need to call run() first"
 
-        if not re.search(pattern, self.log_content, re.MULTILINE):
-            raise AssertionError(f"""Pattern not found in log: {pattern}
----- Log content ----
-{self.log_content}
------------------""")
+        return bool(re.search(pattern, self.log_content, re.MULTILINE))
 
-    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
+    def assert_log(self, pattern: str) -> None:
+        if self.has_log(pattern):
+            return
+        raise AssertionError(f"Pattern not found in log: {pattern}\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
+
+    def assert_not_log(self, pattern: str) -> None:
+        if not self.has_log(pattern):
+            return
+        raise AssertionError(f"Pattern found in log: {pattern}\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
+
+    def has_json(self, condition_func: Callable[[dict], bool]) -> bool:
         """Check if any JSON line matches the condition function."""
 
         assert self.log_content, "Need to call run() first"
@@ -94,16 +114,27 @@ class FatraceRunner:
             entry = json.loads(line)
             try:
                 if condition_func(entry):
-                    return
+                    return True
             except KeyError:
                 # Ignore entries that do not match the expected structure
                 pass
+        return False
 
-        raise AssertionError(f"""No JSON entry matched condition
----- Log content ----
-{self.log_content}
------------------""")
+    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
+        if self.has_json(condition_func):
+            return
+        raise AssertionError("No JSON entry matched condition\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
 
+    def assert_not_json(self, condition_func: Callable[[dict], bool]) -> None:
+        if not self.has_json(condition_func):
+            return
+        raise AssertionError("At least one JSON entry matched condition\n"
+                             "---- Log content ----\n"
+                             f"{self.log_content}\n"
+                             "-----------------")
 
 class FatraceTests(unittest.TestCase):
     def setUp(self):
@@ -573,6 +604,105 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
                     e["path_raw"] == filebytes and
                     "path" not in e
                 ))
+
+    def test_dir_few(self):
+        yes1 = str(self.tmp_path / "yes-1")
+        yes2 = str(self.tmp_path / "yes-2")
+        no1 = str(self.tmp_path / "no-1")
+        no2 = str(self.tmp_path / "no-2")
+
+        exe(["mkdir", yes1])
+        exe(["mkdir", yes2])
+        exe(["mkdir", no1])
+        exe(["mkdir", no2])
+
+        f = FatraceRunner(["-s", "3", "--dir", yes1, "--dir", yes2])
+        f_json = FatraceRunner(["-s", "3", "--json", "--dir", yes1, "--dir", yes2])
+
+        slow_exe(["mkdir", f"{yes1}/sub"])
+        slow_exe(["mkdir", f"{yes2}/sub"])
+        slow_exe(["mkdir", f"{no1}/sub"])
+        slow_exe(["mkdir", f"{no2}/sub"])
+
+        slow_exe(["touch", f"{yes1}/fileA"])
+        slow_exe(["touch", f"{yes1}/sub/fileB"])
+        slow_exe(["touch", f"{yes2}/fileC"])
+        slow_exe(["touch", f"{yes2}/sub/fileD"])
+        slow_exe(["touch", f"{no1}/fileE"])
+        slow_exe(["touch", f"{no1}/sub/fileF"])
+        slow_exe(["touch", f"{no2}/fileG"])
+        slow_exe(["touch", f"{no2}/sub/fileH"])
+
+        slow_exe(["mv", f"{no1}/sub", f"{yes1}/sub_moved"])
+        slow_exe(["mv", f"{yes1}/sub", f"{no1}/sub_moved"])
+
+        slow_exe(["touch", f"{yes1}/sub_moved/fileF"])
+        slow_exe(["touch", f"{no1}/sub_moved/fileB"])
+
+        f.finish()
+        f_json.finish()
+
+        assert "Directories are too many to watch separately." not in f.stderr_content
+        assert "Directories are too many to watch separately." not in f_json.stderr_content
+
+        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/fileA")
+        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/sub/fileB")
+        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes2)}/fileC")
+        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes2)}/sub/fileD")
+        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/sub_moved/fileF")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/fileE")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/sub/fileF")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no2)}/fileG")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no2)}/sub/fileH")
+        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/sub_moved/fileB")
+        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/fileA")
+        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/sub/fileB")
+        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/fileC")
+        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/sub/fileD")
+        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/sub_moved/fileF")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/fileE")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/sub/fileF")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/fileG")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/sub/fileH")
+        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/sub_moved/fileB")
+
+    def test_dir_many(self):
+        yesmany = str(self.tmp_path / "yes-many")
+        nomany = str(self.tmp_path / "no-many")
+        exe(["mkdir", yesmany])
+        exe(["mkdir", nomany])
+        for i in range(5000):
+            exe(["mkdir", f"{yesmany}/existing-dir-{i}"])
+            exe(["touch", f"{yesmany}/existing-dir-{i}/file"])
+            exe(["mkdir", f"{nomany}/existing-dir-{i}"])
+            exe(["touch", f"{nomany}/existing-dir-{i}/file"])
+
+        f = FatraceRunner(["-s", "3", "--dir", yesmany])
+        f_json = FatraceRunner(["-s", "3", "--json", "--dir", yesmany])
+
+        for i in range(5):
+            slow_exe(["touch", f"{yesmany}/existing-dir-{i}/file"])
+            exe(["mkdir", f"{yesmany}/new-dir-{i}"])
+            slow_exe(["touch", f"{yesmany}/new-dir-{i}/file"])
+            slow_exe(["touch", f"{nomany}/existing-dir-{i}/file"])
+            exe(["mkdir", f"{nomany}/new-dir-{i}"])
+            slow_exe(["touch", f"{nomany}/new-dir-{i}/file"])
+
+        f.finish()
+        f_json.finish()
+
+        assert "Directories are too many to watch separately." in f.stderr_content
+        assert "Directories are too many to watch separately." in f_json.stderr_content
+
+        for i in range(5):
+            f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yesmany)}/existing-dir-{i}/file")
+            f.assert_log(rf"^touch\([0-9]*\): CW?O? +{re.escape(yesmany)}/new-dir-{i}/file")
+            f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(nomany)}/existing-dir-{i}/file")
+            f.assert_not_log(rf"^touch\([0-9]*\): CW?O? +{re.escape(nomany)}/new-dir-{i}/file")
+            f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yesmany}/existing-dir-{i}/file")
+            f_json.assert_json(lambda e: e["comm"] == "touch" and "C" in e["types"] and e["path"] == f"{yesmany}/new-dir-{i}/file")
+            f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{nomany}/existing-dir-{i}/file")
+            f_json.assert_not_json(lambda e: e["comm"] == "touch" and "C" in e["types"] and e["path"] == f"{nomany}/new-dir-{i}/file")
 
     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
