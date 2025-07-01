@@ -22,6 +22,7 @@ import time
 import re
 import functools
 import tempfile
+import json
 
 # standard time for measuring in seconds
 DURATION = 60
@@ -61,7 +62,7 @@ def probe():
     time.sleep(1)
 
     output = {}
-    fatrace = subprocess.Popen(['fatrace', '-tts', str(DURATION), '-p', str(powertop.pid)],
+    fatrace = subprocess.Popen(['fatrace', '-jtts', str(DURATION), '-p', str(powertop.pid)],
                                stdout=subprocess.PIPE, env=env)
     output['fatrace'] = fatrace.communicate()[0].decode('UTF-8', errors='ignore')
 
@@ -81,20 +82,14 @@ def parse_fatrace_events(lines):
 
     Return array of (program, pid, mode, file) tuples.
     '''
-    event_re = re.compile('(\d+.\d+) (\S+)\((\d+)\): ([A-Z]+) (.+)$')
-
     prev_timestamp = None
 
     events = []
 
     for line in lines:
-        m = event_re.match(line)
-        if not m:
-            sys.stderr.write('Ignoring unparseable line: %s\n' % line)
-            continue
+        event = json.loads(line)
 
-        timestamp = float(m.group(1))
-        event = m.groups()[1:]
+        timestamp = event['timestamp']
         if prev_timestamp and (timestamp - prev_timestamp < 0.01) and event == events[-1]:
             continue
         prev_timestamp = timestamp
@@ -111,14 +106,19 @@ def group_fatrace_events(events):
     '''
     groups = {}
     for event in events:
-        if event[2] == 'C':
+        if event['types'] == 'C':
             # ignore read-close events for now
             continue
 
-        stat = groups.setdefault(event[0], {}).setdefault(event[3], [0, 0])
-        if 'W' in event[2]:
+        comm = event['comm'] if 'comm' in event else 'unknown'
+        if 'path' in event: path = event['path']
+        elif 'device' in event:
+            path = 'device %i:%i inode %i' % (*event['device'], event['inode'])
+        else: path = 'unknown'
+        stat = groups.setdefault(comm, {}).setdefault(path, [0, 0])
+        if 'W' in event['types']:
             stat[1] += 1
-        elif event[2] in ('R', 'O', 'RO'):
+        elif event['types'] in ('R', 'O', 'RO'):
             stat[0] += 1
 
     return groups

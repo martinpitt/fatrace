@@ -29,7 +29,10 @@ output line. To avoid this, redirect the output into a file.
 
 .SH OUTPUT FORMAT
 
-A typical event looks like
+There are two output formats. The default text format is easier on human eyes,
+while the JSONL format is more suitable for automatic processing.
+
+In text format, a typical event looks like
 
 .RS 4
 rsyslogd(875): W /var/log/auth.log
@@ -37,7 +40,12 @@ rsyslogd(875): W /var/log/auth.log
 compiz(1971): O device 8:2 inode 658203
 .RE
 
-The line has the following fields:
+In text format, the line has the following fields:
+
+.IP \(bu 2
+The current time, if you specify the
+.B \-\-timestamp
+option.
 
 .IP \(bu 2
 Process name. This is read from /proc/pid/comm, and might be abbreviated for
@@ -45,6 +53,11 @@ long process names.
 
 .IP \(bu 2
 Process ID
+
+.IP \(bu 2
+UID and GID, if you specify the
+.B \-\-user
+option.
 
 .IP \(bu 2
 Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
@@ -62,10 +75,96 @@ prints the devices' major and minor number and the inode number. To examine
 such a process in more detail, you should consider using
 .BR strace (1).
 
+.IP \(bu 2
+Path to executable, if you specify the \fB\-\-exe\fR option. This is read from
+/proc/pid/exe.
+
+.IP \(bu 2
+Parent process information, if you specify the \fB\-\-ancestors\fR option. This
+information includes process ID, name and executable path, as appropriate.
+
 .RE
-If you specify the
+
+In JSONL format, the line is a JSON-encoded object with the following fields:
+
+.TP
+.B timestamp
+The current time, if you specify the
 .B \-\-timestamp
-option, the first field will be the current time.
+option.
+
+.TP
+.B comm
+Process name. This is read from /proc/pid/comm, and might be abbreviated for
+long process names.
+
+.TP
+.B comm_raw
+The raw bytes of the process name, in case it is not valid UTF-8.
+
+.TP
+.B pid
+Process ID
+
+.TP
+.B uid
+UID, if you specify the
+.B \-\-user
+option.
+
+.TP
+.B gid
+GID, if you specify the
+.B \-\-user
+option.
+
+.TP
+.B types
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
+directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
+or \fB>\fR (moved to).
+Combinations are possible, such as \fBCW\fR for closing a written file, or <>
+for renaming a file within the same directory.
+
+Directory events can only be detected on Linux 5.1 or higher.
+
+.TP
+.B device
+device ID in
+.B [major,minor]
+form, if it can be determined.
+
+.TP
+.B inode
+The file inode, if it can be determined.
+
+.TP
+.B path
+The path to the affected file, if it can be determined.
+
+.TP
+.B path_raw
+The raw bytes of the path to the affected file, in case it is not valid UTF-8.
+
+.TP
+.B exe
+The path to the executable, if you specify the
+.B \-\-exe
+option.
+
+.TP
+.B exe_raw
+The raw bytes of the executable path, in case it is not valid UTF-8.
+
+.TP
+.B ancestors
+An array of parent processes, if you specify the \fB\-\-ancestors\fR option.
+Each item is an object containing \fBpid\fR, \fBcomm\fR, \fBcomm_raw\fR,
+\fBexe\fR and \fBexe_raw\fR fields as appropriate.
+
+.TP
+.B problems
+An array of strings describing problems that occurred while processing the events, if any.
 
 .SH OPTIONS
 
@@ -101,9 +200,8 @@ Ignore events for this process ID. Can be specified multiple times.
 Show only the given event types.
 .B TYPES
 is a list of
-.BR C ", " R ", " O ", " W ", " D ", " + ", or " <
-with the above meanings. < and > both mean "move" and will always enable both
-directions.
+.BR C ", " R ", " O ", " W ", " D ", " + ", " < ", or " >
+with the above meanings.
 
 E. g. use
 .B \--filter=OC
@@ -112,6 +210,31 @@ to only show open and close events.
 .TP
 .B \-C \fICOMMAND\fR, \fB\-\-command=\fICOMMAND
 Show only events for this command.
+
+.TP
+.B \-j\fR, \fB\-\-json
+Write events in JSONL format (see definition above).
+
+.TP
+.B \-i\fR, \fB\-\-inclusive
+Include possible false negatives, i.e. events where missing data makes filtering ambiguous.
+If \fB\-\-command\fR is specified, events with unknown command will be printed.
+If \fB\-\-dir\fR is specified, events with unknown path will be printed.
+
+.TP
+.B \-a\fR, \fB\-\-ancestors
+Print information about parents processes.
+
+.TP
+.B \-e\fR, \fB\-\-exe
+Print executable path.
+
+.TP
+.B \-d\fR, \fB\-\-dir
+Show only events where the affected file is under this path. Can be specified
+multiple times to include events from several paths. If the directories
+contained under these paths are sufficiently few (4096 or less), the events are
+filtered by the kernel.
 
 .TP
 .B \-h \fR, \fB\-\-help
