@@ -289,7 +289,8 @@ print_event (const struct fanotify_event_metadata *data,
         }
     }
 
-    if (option_comm && strcmp (option_comm, procname) != 0) {
+    if (option_comm && strcmp (option_comm, procname) != 0 &&
+        procname[0] != '\0') {
         if (event_fd >= 0)
             close (event_fd);
         return;
