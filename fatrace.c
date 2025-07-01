@@ -275,7 +275,6 @@ print_event (const struct fanotify_event_metadata *data,
         close (proc_fd);
     } else {
         debug ("failed to open /proc/%i: %m", data->pid);
-        procname[0] = '\0';
     }
 
     /* /proc/pid/comm often goes away before processing the event; reuse previously cached value if pid still matches */
