@@ -298,6 +298,20 @@ print_json_str (const char* key, const char* value) {
     }
 }
 
+/* given an fd to /proc/PID, return the parent PID if it can be determined,
+   otherwise 0. */
+static int
+get_ppid (int proc_fd) {
+    static char statbuf[4096];
+    int stat_fd = openat (proc_fd, "stat", O_RDONLY);
+    ssize_t len = read (stat_fd, statbuf, sizeof (statbuf));
+    close (stat_fd);
+    int ret;
+    if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
+        return ret;
+    return 0;
+}
+
 /**
  * print_event:
  *
@@ -315,8 +329,6 @@ print_event (const struct fanotify_event_metadata *data,
     bool got_procname = false;
     struct stat proc_fd_stat = { .st_uid = -1 };
     int ppid = 0;
-    bool got_ppid = false;
-    static char statbuf[4096];
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
@@ -328,13 +340,8 @@ print_event (const struct fanotify_event_metadata *data,
     int proc_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
         /* get ppid */
-        if (option_ancestors) {
-            int ppid_fd = openat (proc_fd, "stat", O_RDONLY);
-            ssize_t len = read (ppid_fd, statbuf, sizeof (statbuf));
-            close (ppid_fd);
-            if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ppid) == 1)
-                got_ppid = true;
-        }
+        if (option_ancestors)
+            ppid = get_ppid (proc_fd);
 
         /* read process name */
         int procname_fd = openat (proc_fd, "comm", O_RDONLY);
@@ -449,7 +456,7 @@ print_event (const struct fanotify_event_metadata *data,
     } else {
         printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
     }
-    if (option_ancestors && got_ppid) {
+    if (option_ancestors && ppid) {
         printf(option_json ? ",\"ancestors\":" : ", ancestors");
         char sep = option_json ? '[' : '=';
         while (ppid) {
@@ -475,16 +482,8 @@ print_event (const struct fanotify_event_metadata *data,
                 /* get next parent */
                 if (ppid == 1)
                     ppid = 0;
-                else {
-                    int p_stat_fd = openat (ppid_dir_fd, "stat", O_RDONLY);
-                    len = read (p_stat_fd, statbuf, sizeof (statbuf));
-                    close (p_stat_fd);
-                    if (len >= 0) {
-                        if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ppid) != 1) {
-                            ppid = 0; // stop here
-                        }
-                    }
-                }
+                else
+                    ppid = get_ppid (ppid_dir_fd);
                 close (ppid_dir_fd);
             }
             putchar(option_json ? '}' : ')');
