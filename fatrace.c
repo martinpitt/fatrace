@@ -487,6 +487,8 @@ print_event (const struct fanotify_event_metadata *data,
                 else
                     ppid = get_ppid (ppid_dir_fd);
                 close (ppid_dir_fd);
+            } else {
+                ppid = 0;
             }
             putchar(option_json ? '}' : ')');
         } while (ppid);
