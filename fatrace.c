@@ -467,7 +467,7 @@ print_event (const struct fanotify_event_metadata *data,
     if (option_ancestors && ppid) {
         printf(option_json ? ",\"ancestors\":" : ", ancestors");
         char sep = option_json ? '[' : '=';
-        while (ppid) {
+        do {
             printf(option_json ? "%c{\"pid\":%i" : "%c(pid=%i", sep, ppid);
             sep = ',';
             snprintf (printbuf, sizeof (printbuf), "/proc/%i", ppid);
@@ -489,8 +489,9 @@ print_event (const struct fanotify_event_metadata *data,
                 close (ppid_dir_fd);
             }
             putchar(option_json ? '}' : ')');
-        }
-        if (option_json) putchar(']');
+        } while (ppid);
+        if (option_json)
+            putchar(']');
     }
     printf(option_json ? "}\n" : "\n");
 }
