@@ -298,6 +298,23 @@ print_json_str (const char* key, const char* value) {
     }
 }
 
+/* given an fd to /proc/PID and a buffer of size TASK_COMM_LEN, try to read the
+   process name. Return true on success. */
+static bool
+get_procname (int proc_fd, char *procname) {
+    int fd = openat (proc_fd, "comm", O_RDONLY);
+    ssize_t len = read (fd, procname, TASK_COMM_LEN);
+    close (fd);
+    if (len >= 0) {
+        while (len > 0 && procname[len-1] == '\n')
+            len--;
+        procname[len] = '\0';
+        return true;
+    }
+    debug ("failed to read /proc/PID/comm");
+    return false;
+}
+
 /* given an fd to /proc/PID, return the parent PID if it can be determined,
    otherwise 0. */
 static int
@@ -344,19 +361,10 @@ print_event (const struct fanotify_event_metadata *data,
             ppid = get_ppid (proc_fd);
 
         /* read process name */
-        int procname_fd = openat (proc_fd, "comm", O_RDONLY);
-        ssize_t len = read (procname_fd, procname, sizeof (procname));
-        if (len >= 0) {
-            while (len > 0 && procname[len-1] == '\n')
-                len--;
-            procname[len] = '\0';
+        if (get_procname (proc_fd, procname)) {
             procname_pid = data->pid;
             got_procname = true;
-        } else {
-            debug ("failed to read /proc/%i/comm", data->pid);
         }
-
-        close (procname_fd);
 
         /* get user and group */
         if (option_user) {
@@ -466,13 +474,7 @@ print_event (const struct fanotify_event_metadata *data,
             int ppid_dir_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
             if (ppid_dir_fd >= 0) {
                 char p_procname[TASK_COMM_LEN];
-                int p_procname_fd = openat (ppid_dir_fd, "comm", O_RDONLY);
-                ssize_t len = read (p_procname_fd, p_procname, sizeof (p_procname));
-                close (p_procname_fd);
-                if (len >= 0) {
-                    while (len > 0 && p_procname[len-1] == '\n')
-                        len--;
-                    p_procname[len] = '\0';
+                if (get_procname (ppid_dir_fd, p_procname)) {
                     if (option_json) {
                         putchar(',');
                         print_json_str("comm", p_procname);
