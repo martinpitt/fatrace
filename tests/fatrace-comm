@@ -21,7 +21,7 @@ RC=0
 check_log() {
     if ! grep -q "$1" $LOG; then
         echo "$1 not found in log" >&2
-        ((RC=RC+1))
+        RC=$((RC+1))
     fi
 }
 
@@ -29,7 +29,7 @@ check_log "^touch([0-9]*).*includeme$"
 
 if grep -Eq "notme|^dd" $LOG; then
     echo "notme found in log" >&2
-    ((RC=RC+1))
+    RC=$((RC+1))
 fi
 
 # exceeds TASK_COMM_LEN
