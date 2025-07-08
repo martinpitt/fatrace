@@ -31,7 +31,8 @@ check_log() {
 }
 
 # accessing the "head" binary
-check_log "RC\?O\? \+/usr/bin/head$"
+head="$(which head)"
+check_log "RC\?O\? \+${head}$"
 # head accessing /etc/passwd
 check_log "RC\?O\? \+/etc/passwd$"
 # file creation
