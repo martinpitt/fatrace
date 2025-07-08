@@ -37,7 +37,7 @@ RC=0
 check_log() {
     if ! grep -q "$1" $LOG; then
         echo "$1 not found in log" >&2
-        ((RC=RC+1))
+        RC=$((RC+1))
     fi
 }
 
