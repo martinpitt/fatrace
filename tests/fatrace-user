@@ -10,7 +10,7 @@ trap "rm -rf tmp" EXIT INT QUIT PIPE
 
 LOG="$AUTOPKGTEST_TMP/fatrace.log"
 echo "starting fatrace..."
-fatrace --current-mount --user -s 2 -o $LOG &
+fatrace --current-mount --user -s 4 -o $LOG &
 sleep 1
 
 echo "read a file as root ..."
