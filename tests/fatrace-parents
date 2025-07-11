@@ -1,0 +1,50 @@
+#!/bin/sh
+set -euC
+
+mkdir -m 777 tmp
+trap "rm -rf tmp" EXIT INT QUIT PIPE
+
+LOG="$AUTOPKGTEST_TMP/fatrace.log"
+LOG_JSON="$AUTOPKGTEST_TMP/fatrace.log.json"
+echo "starting fatrace..."
+fatrace --current-mount --s 2 -o $LOG --parents &
+fatrace --current-mount --s 2 -o $LOG_JSON --json --parents &
+sleep 1
+
+export bashcmd='touch tmp/file.tmp; echo $$ > tmp/bash.pid;'
+export pythoncmd='
+import os,subprocess
+subprocess.run(["bash", "-c", os.environ["bashcmd"]])
+with open("tmp/python.pid", "w") as f: f.write(f"{os.getpid()}\n")
+'
+python3 -c "$pythoncmd"
+
+echo "waiting for fatrace..."
+wait
+
+echo "checking log..."
+check_log() {
+    grep -q "$1" $LOG
+}
+check_log_json() {
+    select_expr="$1"
+    shift
+    jq -e "select($select_expr)" "$@" < $LOG_JSON > /dev/null
+}
+
+bash_pid="$(cat "tmp/bash.pid")"
+python_pid=$(cat "tmp/python.pid")
+test_pid="$$"
+
+check_log "^touch([0-9]*): C\?WO\? .*/tmp/file.tmp, parents=(pid=$bash_pid comm=bash),(pid=$python_pid comm=python3),(pid=$test_pid comm=fatrace-parents),.*,(pid=1 comm=[a-z]\+)$"
+
+check_log_json '
+        .comm=="touch" and .path==$path
+        and .parents[0]=={"comm":"bash","pid":$bash_pid}
+        and .parents[1]=={"comm":"python3","pid":$python_pid}
+        and .parents[2]=={"comm":"fatrace-parents","pid":$test_pid}
+    ' \
+    --arg path "$(realpath tmp)/file.tmp" \
+    --argjson bash_pid "$bash_pid" \
+    --argjson python_pid "$python_pid" \
+    --argjson test_pid $test_pid
