@@ -491,7 +491,7 @@ print_event (const struct fanotify_event_metadata *data,
                 ppid = 0;
             }
             putchar(option_json ? '}' : ')');
-        } while (ppid);
+        } while (ppid > 0);
         if (option_json)
             putchar(']');
     }
