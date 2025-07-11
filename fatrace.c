@@ -325,7 +325,7 @@ print_event (const struct fanotify_event_metadata *data,
     if (proc_fd >= 0) {
         /* read process name */
         int procname_fd = openat (proc_fd, "comm", O_RDONLY);
-        ssize_t len = read (procname_fd, procname, sizeof (procname));
+        ssize_t len = read (procname_fd, procname, sizeof (procname) - 1);
         if (len >= 0) {
             while (len > 0 && procname[len-1] == '\n')
                 len--;
