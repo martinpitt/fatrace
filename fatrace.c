@@ -301,9 +301,9 @@ print_json_str (const char* key, const char* value) {
 /* given an fd to /proc/PID and a buffer of size TASK_COMM_LEN, try to read the
    process name. Return true on success. */
 static bool
-get_procname (int proc_fd, char *procname) {
+get_procname (int proc_fd, char *procname, size_t procname_size) {
     int fd = openat (proc_fd, "comm", O_RDONLY);
-    ssize_t len = read (fd, procname, TASK_COMM_LEN);
+    ssize_t len = read (fd, procname, procname_size);
     close (fd);
     if (len >= 0) {
         while (len > 0 && procname[len-1] == '\n')
@@ -361,7 +361,7 @@ print_event (const struct fanotify_event_metadata *data,
             ppid = get_ppid (proc_fd);
 
         /* read process name */
-        if (get_procname (proc_fd, procname)) {
+        if (get_procname (proc_fd, procname, sizeof (procname))) {
             procname_pid = data->pid;
             got_procname = true;
         }
@@ -474,7 +474,7 @@ print_event (const struct fanotify_event_metadata *data,
             int ppid_dir_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
             if (ppid_dir_fd >= 0) {
                 char p_procname[TASK_COMM_LEN];
-                if (get_procname (ppid_dir_fd, p_procname)) {
+                if (get_procname (ppid_dir_fd, p_procname, sizeof (p_procname))) {
                     if (option_json) {
                         putchar(',');
                         print_json_str("comm", p_procname);
