@@ -68,7 +68,7 @@ static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
 static int option_json = 0;
-static int option_ancestors = 0;
+static int option_parents = 0;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -357,7 +357,7 @@ print_event (const struct fanotify_event_metadata *data,
     int proc_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
         /* get ppid */
-        if (option_ancestors)
+        if (option_parents)
             ppid = get_ppid (proc_fd);
 
         /* read process name */
@@ -464,8 +464,8 @@ print_event (const struct fanotify_event_metadata *data,
     } else {
         printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
     }
-    if (option_ancestors && ppid) {
-        printf(option_json ? ",\"ancestors\":" : ", ancestors");
+    if (option_parents && ppid) {
+        printf(option_json ? ",\"parents\":" : ", parents");
         char sep = option_json ? '[' : '=';
         do {
             printf(option_json ? "%c{\"pid\":%i" : "%c(pid=%i", sep, ppid);
@@ -604,7 +604,7 @@ help (void)
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, W, +, D, < or >, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
-"  -a, --ancestors\t\tInclude information about parent processes.\n"
+"  -P, --parents\t\tInclude information about all parent processes.\n"
 "  -h, --help\t\t\tShow help.");
 }
 
@@ -631,7 +631,7 @@ parse_args (int argc, char** argv)
         {"filter",        required_argument, 0, 'f'},
         {"command",       required_argument, 0, 'C'},
         {"json",          no_argument,       0, 'j'},
-        {"ancestors",     no_argument,       0, 'a'},
+        {"parents",       no_argument,       0, 'P'},
         {"help",          no_argument,       0, 'h'},
         {0,               0,                 0,  0 }
     };
@@ -728,8 +728,8 @@ parse_args (int argc, char** argv)
                 option_json = 1;
                 break;
 
-            case 'a':
-                option_ancestors = 1;
+            case 'P':
+                option_parents = 1;
                 break;
 
             case 'h':

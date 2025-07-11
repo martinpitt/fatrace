@@ -14,7 +14,7 @@ for t in \
     fatrace-comm \
     fatrace-comm-json \
     fatrace-json \
-    fatrace-ancestors \
+    fatrace-parents \
 ; do
     export AUTOPKGTEST_TMP=$(mktemp -d)
     echo "===== $t ===="
