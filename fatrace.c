@@ -317,13 +317,13 @@ get_procname (int proc_fd, char *procname, size_t procname_size) {
 
 /* given an fd to /proc/PID, return the parent PID if it can be determined,
    otherwise 0. */
-static int
+static pid_t
 get_ppid (int proc_fd) {
     static char statbuf[4096];
     int stat_fd = openat (proc_fd, "stat", O_RDONLY);
     ssize_t len = read (stat_fd, statbuf, sizeof (statbuf));
     close (stat_fd);
-    int ret;
+    pid_t ret;
     if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
         return ret;
     return 0;
