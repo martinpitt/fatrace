@@ -303,7 +303,7 @@ print_json_str (const char* key, const char* value) {
 static bool
 get_procname (int proc_fd, char *procname, size_t procname_size) {
     int fd = openat (proc_fd, "comm", O_RDONLY);
-    ssize_t len = read (fd, procname, procname_size);
+    ssize_t len = read (fd, procname, procname_size - 1);
     close (fd);
     if (len >= 0) {
         while (len > 0 && procname[len-1] == '\n')
