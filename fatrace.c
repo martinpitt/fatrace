@@ -645,6 +645,9 @@ parse_args (int argc, char** argv)
         switch (c) {
             case 'C':
                 option_comm = strdup (optarg);
+		if (!option_comm) {
+			errx(EXIT_FAILURE, "memory allocation failed for -- command");
+		}
                 /* see https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html */
                 if (strlen (option_comm) > TASK_COMM_LEN - 1) {
                     option_comm[TASK_COMM_LEN - 1] = '\0';
