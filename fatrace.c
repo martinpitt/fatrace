@@ -61,14 +61,14 @@
 static char* option_output = NULL;
 static long option_filter_mask = 0xffffffff;
 static long option_timeout = -1;
-static int option_current_mount = 0;
+static bool option_current_mount = false;
 static int option_timestamp = 0;
-static int option_user = 0;
+static bool option_user = false;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
-static int option_json = 0;
-static int option_parents = 0;
+static bool option_json = false;
+static bool option_parents = false;
 
 /* --time alarm sets this to 0 */
 static volatile int running = 1;
@@ -655,7 +655,7 @@ parse_args (int argc, char** argv)
                 break;
 
             case 'c':
-                option_current_mount = 1;
+                option_current_mount = true;
                 break;
 
             case 'o':
@@ -665,7 +665,7 @@ parse_args (int argc, char** argv)
                 break;
 
             case 'u':
-                option_user = 1;
+                option_user = true;
                 break;
 
             case 'f':
@@ -729,11 +729,11 @@ parse_args (int argc, char** argv)
                 break;
 
             case 'j':
-                option_json = 1;
+                option_json = true;
                 break;
 
             case 'P':
-                option_parents = 1;
+                option_parents = true;
                 break;
 
             case 'h':
