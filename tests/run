@@ -2,6 +2,7 @@
 set -eu
 
 MYDIR=$(dirname $(readlink -f "$0"))
+export os_mkdir="$(which mkdir)"
 export PATH=$(pwd):$MYDIR:$PATH
 
 for t in \
@@ -16,6 +17,7 @@ for t in \
     fatrace-json \
     fatrace-parents \
     fatrace-exe \
+    fatrace-dir \
 ; do
     export AUTOPKGTEST_TMP=$(mktemp -d)
     echo "===== $t ===="

@@ -7,8 +7,8 @@ trap "rm -rf tmp" EXIT INT QUIT PIPE
 LOG="$AUTOPKGTEST_TMP/fatrace.log"
 LOG_JSON="$AUTOPKGTEST_TMP/fatrace.log.json"
 echo "starting fatrace..."
-fatrace --current-mount --s 2 -o $LOG --parents &
-fatrace --current-mount --s 2 -o $LOG_JSON --json --parents &
+fatrace --current-mount -s 2 -o $LOG --parents &
+fatrace --current-mount -s 2 -o $LOG_JSON --json --parents &
 sleep 1
 
 export bashcmd='touch tmp/file.tmp; echo $$ > tmp/bash.pid;'

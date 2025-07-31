@@ -4,8 +4,8 @@ set -euC
 LOG="$AUTOPKGTEST_TMP/fatrace.log"
 LOG_JSON="$AUTOPKGTEST_TMP/fatrace.log.json"
 echo "starting fatrace..."
-fatrace --current-mount --s 2 -o $LOG --parents --exe &
-fatrace --current-mount --s 2 -o $LOG_JSON --json --parents --exe &
+fatrace --current-mount -s 2 -o $LOG --parents --exe &
+fatrace --current-mount -s 2 -o $LOG_JSON --json --parents --exe &
 sleep 1
 
 export bashcmd='touch $AUTOPKGTEST_TMP/file.tmp; echo $$ > $AUTOPKGTEST_TMP/bash.pid;'
