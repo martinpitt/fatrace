@@ -43,28 +43,25 @@ compiz(1971): O device 8:2 inode 658203
 In text format, the line has the following fields:
 
 .IP \(bu 2
-The current time, if you specify the
-.B \-\-timestamp
-option.
+The current time, if you specify the \fB\-\-timestamp\fR option.
 
 .IP \(bu 2
-Process name. This is read from /proc/pid/comm, and might be abbreviated for
+Process name. This is read from /proc/pid/comm, which might be abbreviated for
 long process names.
 
 .IP \(bu 2
 Process ID
 
 .IP \(bu 2
-UID and GID, if you specify the
-.B \-\-user
-option.
+UID and GID, if you specify the \fB\-\-user\fR option. It is formatted as
+"[uid:gid]".
 
 .IP \(bu 2
 Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
 directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
 or \fB>\fR (moved to).
-Combinations are possible, such as \fBCW\fR for closing a written file, or <>
-for renaming a file within the same directory.
+Combinations are possible, such as \fBCW\fR for closing a written file, or
+\fB<>\fR for renaming a file within the same directory.
 
 Directory events can only be detected on Linux 5.1 or higher.
 
@@ -80,12 +77,11 @@ Path to executable, if you specify the \fB\-\-exe\fR option. This is read from
 /proc/pid/exe.
 
 .IP \(bu 2
-Parent process information, if you specify the \fB\-\-parents\fR option and
-the parent process ID can be determined. This information includes, for each
-successive parent process, the process ID, the process name if it can be
-determined, and the executable path if it can be determined and you specify the
-\fB\-\-exe\fR option. If the last item in the list does not have process ID 1,
-then the information is incomplete.
+Parent process information, if you specify the \fB\-\-parents\fR option. This
+information includes, for each successive parent process, the process ID, the
+process name, and the executable path if you specify the \fB\-\-exe\fR option.
+If fatrace fails to determine some of this information, fields may be missing or
+the list may end before the process with ID 1.
 
 .RE
 
@@ -99,12 +95,13 @@ option.
 
 .TP
 .B comm
-Process name, if it can be determined. This is read from /proc/pid/comm, and
-might be abbreviated for long process names.
+Process name. This is read from /proc/pid/comm, which might be abbreviated for
+long process names.
 
 .TP
 .B comm_raw
-The raw bytes of the process name, in case it is invalid UTF-8 or would require escaping.
+The raw bytes of the process name, in case it is invalid UTF-8 or would require
+escaping.
 
 .TP
 .B pid
@@ -112,61 +109,55 @@ Process ID
 
 .TP
 .B uid
-UID, if you specify the
-.B \-\-user
-option and it can be determined.
+UID, if you specify the \fB\-\-user\fR option.
 
 .TP
 .B gid
-GID, if you specify the
-.B \-\-user
-option and it can be determined.
+GID, if you specify the \fB\-\-user\fR option.
 
 .TP
 .B types
 Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
 directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
 or \fB>\fR (moved to).
-Combinations are possible, such as \fBCW\fR for closing a written file, or <>
-for renaming a file within the same directory.
+Combinations are possible, such as \fBCW\fR for closing a written file, or
+\fB<>\fR for renaming a file within the same directory.
 
 Directory events can only be detected on Linux 5.1 or higher.
 
 .TP
 .B device
-device ID in
-.B {"major":major,"minor":minor}
-form, if it can be determined.
+device ID in \fB{"major":major,"minor":minor}\fR form.
 
 .TP
 .B inode
-The file inode, if it can be determined.
+The file inode.
 
 .TP
 .B path
-The path to the affected file, if it can be determined.
+The path to the affected file.
 
 .TP
 .B path_raw
-The raw bytes of the path to the affected file, in case it is invalid UTF-8 or would require escaping.
+The raw bytes of the path to the affected file, in case it is invalid UTF-8 or
+would require escaping.
 
 .TP
 .B exe
-The path to the executable, if you specify the
-.B \-\-exe
-option.
+The path to the executable, if you specify the \fB\-\-exe\fR option.
 
 .TP
 .B exe_raw
-The raw bytes of the executable path, in case it is not valid UTF-8.
+The raw bytes of the executable path, in case it is not valid UTF-8 or would
+require escaping.
 
 .TP
 .B parents
-An array of parent processes, if you specify the \fB\-\-parents\fR option and
-the parent process ID can be determined. Each item is an object containing
-\fBpid\fR, \fBcomm\fR, \fBcomm_raw\fR, \fBexe\fR and \fBexe_raw\fR fields as
-appropriate. If the last item in the list does not have process ID 1, then the
-information is incomplete.
+An array of parent processes, if you specify the \fB\-\-parents\fR option. Each
+item is an object containing \fBpid\fR, \fBcomm\fR, \fBcomm_raw\fR, \fBexe\fR
+and \fBexe_raw\fR fields as appropriate. If fatrace fails to determine some of
+this information, fields may be missing or the list may end before the process
+with ID 1.
 
 .SH OPTIONS
 
@@ -191,7 +182,7 @@ is printed as seconds/microseconds since the epoch.
 
 .TP
 .B \-u\fR, \fB\-\-user
-Add process user information to events, formatted as "[uid:gid]".
+Add process user information to events.
 
 .TP
 .B \-p \fIPID\fR, \fB\-\-ignore\-pid=\fIPID
@@ -199,16 +190,12 @@ Ignore events for this process ID. Can be specified multiple times.
 
 .TP
 .B \-f \fITYPES\fR, \fB\-\-filter=\fITYPES
-Show only the given event types.
-.B TYPES
-is a list of
+Show only the given event types. \fBTYPES\fR is a list of
 .BR C ", " R ", " O ", " W ", " D ", " + ", or " <
-with the above meanings. < and > both mean "move" and will always enable both
-directions.
+with the above meanings. \fB<\fR and \fB>\fR both mean "move" and will always
+enable both directions.
 
-E. g. use
-.B \--filter=OC
-to only show open and close events.
+E. g. use \fB\-\-filter=OC\fR to only show open and close events.
 
 .TP
 .B \-C \fICOMMAND\fR, \fB\-\-command=\fICOMMAND
