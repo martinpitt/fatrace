@@ -38,8 +38,10 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/fanotify.h>
-#include <sys/time.h>
+/* for MIN() */
+#include <sys/param.h>
 #include <sys/sysmacros.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <ctype.h>
 
@@ -304,16 +306,20 @@ print_json_str (const char* key, const char* value) {
 static bool
 get_procname (int proc_fd, char *procname, size_t procname_size) {
     int fd = openat (proc_fd, "comm", O_RDONLY);
+    if (fd < 0) {
+        warn ("failed to open /proc/PID/comm");
+        return false;
+    }
     ssize_t len = read (fd, procname, procname_size - 1);
     close (fd);
-    if (len >= 0) {
-        while (len > 0 && procname[len-1] == '\n')
-            len--;
-        procname[len] = '\0';
-        return true;
+    if (len < 0) {
+        warn ("failed to read /proc/PID/comm");
+        return false;
     }
-    debug ("failed to read /proc/PID/comm");
-    return false;
+    while (len > 0 && procname[len-1] == '\n')
+        len--;
+    procname[len] = '\0';
+    return true;
 }
 
 /* given an fd to /proc/PID, return the parent PID if it can be determined,
@@ -322,11 +328,24 @@ static pid_t
 get_ppid (int proc_fd) {
     static char statbuf[4096];
     int stat_fd = openat (proc_fd, "stat", O_RDONLY);
+    if (stat_fd < 0) {
+        warn ("failed to open /proc/PID/stat");
+        return 0;
+    }
     ssize_t len = read (stat_fd, statbuf, sizeof (statbuf));
     close (stat_fd);
+    if (len < 0) {
+        warn ("failed to read /proc/PID/stat");
+        return 0;
+    }
+    /* buffer is static, and read() does not nul terminate */
+    statbuf[MIN(len, sizeof (statbuf) - 1)] = '\0';
+
     pid_t ret;
-    if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
+    if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
         return ret;
+    /* this *really* should not happen, kernel API change  */
+    warnx ("failed to parse /proc/PID/stat, please file a bug: %s", statbuf);
     return 0;
 }
 
@@ -388,7 +407,7 @@ print_event (const struct fanotify_event_metadata *data,
 
         close (proc_fd);
     } else {
-        debug ("failed to open /proc/%i: %m", data->pid);
+        warn ("failed to open /proc/%i", data->pid);
     }
 
     /* /proc/pid/comm often goes away before processing the event; reuse previously cached value if pid still matches */
@@ -519,6 +538,7 @@ print_event (const struct fanotify_event_metadata *data,
                     ppid = get_ppid (ppid_dir_fd);
                 close (ppid_dir_fd);
             } else {
+                warn ("failed to open %s", printbuf);
                 ppid = 0;
             }
             putchar(option_json ? '}' : ')');
