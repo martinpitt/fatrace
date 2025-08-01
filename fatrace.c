@@ -303,31 +303,45 @@ print_json_str (const char* key, const char* value) {
 /* given an fd to /proc/PID and a buffer of size TASK_COMM_LEN, try to read the
    process name. Return true on success. */
 static bool
-get_procname (int proc_fd, char *procname, size_t procname_size) {
+get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
     int fd = openat (proc_fd, "comm", O_RDONLY);
+    if (fd < 0) {
+        warn ("failed to open /proc/%u/comm", pid);
+        return false;
+    }
     ssize_t len = read (fd, procname, procname_size - 1);
     close (fd);
-    if (len >= 0) {
-        while (len > 0 && procname[len-1] == '\n')
-            len--;
-        procname[len] = '\0';
-        return true;
+    if (len < 0) {
+        warn ("failed to read /proc/%u/comm", pid);
+        return false;
     }
-    debug ("failed to read /proc/PID/comm");
-    return false;
+    while (len > 0 && procname[len-1] == '\n')
+        len--;
+    procname[len] = '\0';
+    return true;
 }
 
 /* given an fd to /proc/PID, return the parent PID if it can be determined,
    otherwise 0. */
 static pid_t
-get_ppid (int proc_fd) {
+get_ppid (int proc_fd, pid_t pid) {
     static char statbuf[4096];
     int stat_fd = openat (proc_fd, "stat", O_RDONLY);
+    if (stat_fd < 0) {
+        warn ("failed to open /proc/%u/stat", pid);
+        return 0;
+    }
     ssize_t len = read (stat_fd, statbuf, sizeof (statbuf));
     close (stat_fd);
+    if (len < 0) {
+        warn ("failed to read /proc/%u/stat", pid);
+        return 0;
+    }
     pid_t ret;
-    if (len >= 0 && sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
+    if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
         return ret;
+    /* this *really* should not happen, kernel API change  */
+    warnx ("failed to parse /proc/%u/stat, please file a bug: %s", pid, statbuf);
     return 0;
 }
 
@@ -362,10 +376,10 @@ print_event (const struct fanotify_event_metadata *data,
     if (proc_fd >= 0) {
         /* get ppid */
         if (option_parents)
-            ppid = get_ppid (proc_fd);
+            ppid = get_ppid (proc_fd, data->pid);
 
         /* read process name */
-        if (get_procname (proc_fd, procname, sizeof (procname))) {
+        if (get_procname (proc_fd, data->pid, procname, sizeof (procname))) {
             procname_pid = data->pid;
             got_procname = true;
         }
@@ -373,7 +387,7 @@ print_event (const struct fanotify_event_metadata *data,
         /* get user and group */
         if (option_user) {
             if (fstat (proc_fd, &proc_fd_stat) < 0)
-                debug ("failed to stat /proc/%i: %m", data->pid);
+                warn ("failed to stat /proc/%i", data->pid);
         }
 
         /* get exe */
@@ -383,13 +397,13 @@ print_event (const struct fanotify_event_metadata *data,
                 exepath[len] = '\0';
                 got_exepath = true;
             } else {
-                debug ("failed to readlink /proc/%i/exe: %m", data->pid);
+                warn ("failed to readlink /proc/%i/exe", data->pid);
             }
         }
 
         close (proc_fd);
     } else {
-        debug ("failed to open /proc/%i: %m", data->pid);
+        warn ("failed to open /proc/%u", data->pid);
     }
 
     /* /proc/pid/comm often goes away before processing the event; reuse previously cached value if pid still matches */
@@ -495,7 +509,7 @@ print_event (const struct fanotify_event_metadata *data,
             int ppid_dir_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
             if (ppid_dir_fd >= 0) {
                 char p_procname[TASK_COMM_LEN];
-                if (get_procname (ppid_dir_fd, p_procname, sizeof (p_procname))) {
+                if (get_procname (ppid_dir_fd, ppid, p_procname, sizeof (p_procname))) {
                     if (option_json) {
                         putchar(',');
                         print_json_str("comm", p_procname);
@@ -517,9 +531,10 @@ print_event (const struct fanotify_event_metadata *data,
                 if (ppid == 1)
                     ppid = 0;
                 else
-                    ppid = get_ppid (ppid_dir_fd);
+                    ppid = get_ppid (ppid_dir_fd, ppid);
                 close (ppid_dir_fd);
             } else {
+                warn ("failed to open %s", printbuf);
                 ppid = 0;
             }
             putchar(option_json ? '}' : ')');
