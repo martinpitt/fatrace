@@ -38,8 +38,10 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/fanotify.h>
-#include <sys/time.h>
+/* for MIN() */
+#include <sys/param.h>
 #include <sys/sysmacros.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <ctype.h>
 
@@ -336,6 +338,9 @@ get_ppid (int proc_fd) {
         warn ("failed to read /proc/PID/stat");
         return 0;
     }
+    /* buffer is static, and read() does not nul terminate */
+    statbuf[MIN(len, sizeof (statbuf) - 1)] = '\0';
+
     pid_t ret;
     if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
         return ret;
