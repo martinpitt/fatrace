@@ -1,2 +1,4 @@
 *.o
+*.so
 /fatrace
+__pycache__
