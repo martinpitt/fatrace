@@ -78,9 +78,6 @@ class FatraceTests(unittest.TestCase):
 
         f.finish()
 
-        if not f.log_content:
-            self.fail("No output captured from fatrace")
-
         # Convert paths to strings for pattern matching
         cwd = str(self.tmp_path)
         test_file_str = str(test_file)
@@ -111,3 +108,32 @@ class FatraceTests(unittest.TestCase):
         # Check ELOOP symlink operations
         f.assert_log(rf"^ln.*:\s+\+\s+{re.escape(cwd)}$")
         f.assert_log(rf"^rm.*:\s+D\s+{re.escape(cwd)}$")
+
+    def test_command(self):
+        f = FatraceRunner(["--current-mount", "--command", "touch", "-s", "2"], self.tmp_path)
+
+        # Create files with different programs
+        subprocess.check_call(["touch", str(self.tmp_path / "includeme")])
+        subprocess.check_call(["dd", "if=/dev/zero", f"of={self.tmp_path}/notme", "bs=1", "count=1", "status=none"])
+
+        f.finish()
+        assert f.log_content
+
+        # Should find touch command
+        f.assert_log(r"^touch.*includeme$")
+
+        # Should NOT find dd command or the file it created
+        if re.search(r"notme|^dd", f.log_content, re.MULTILINE):
+            self.fail("dd command or notme file found in log when filtering for touch only")
+
+    def test_command_long_name(self):
+        # command name that exceeds TASK_COMM_LEN (16 chars)
+        long_cmd = self.tmp_path / "VeryLongTouchCommand"
+        subprocess.check_call(["cp", "/usr/bin/touch", str(long_cmd)])
+
+        f = FatraceRunner(["--current-mount", "--command", "VeryLongTouchCommand", "-s", "2"], self.tmp_path)
+        subprocess.check_call([str(long_cmd), str(self.tmp_path / "hello.txt")])
+        f.finish()
+
+        # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1)
+        f.assert_log(r"^VeryLongTouchCo.*hello\.txt$")
