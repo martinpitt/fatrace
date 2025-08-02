@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
+import json
 import os
 import re
 import subprocess
 import tempfile
 import time
 import unittest
+
 from pathlib import Path
+from typing import Callable
 
 MYDIR = Path(__file__).parent.parent.resolve()
 
@@ -24,11 +27,25 @@ class FatraceRunner:
         with open(self.output_file, 'r') as f:
             self.log_content = f.read()
 
-    def assert_log(self, pattern: str):
+    def assert_log(self, pattern: str) -> None:
         assert self.log_content, "Need to call run() first"
         """Check if a regex pattern exists in the log content."""
         if not re.search(pattern, self.log_content, re.MULTILINE):
             raise AssertionError(f"""Pattern not found in log: {pattern}
+---- Log content ----
+{self.log_content}
+-----------------""")
+
+    def assert_json(self, condition_func: Callable) -> None:
+        assert self.log_content, "Need to call run() first"
+        """Check if any JSON line matches the condition function."""
+        for line in self.log_content.strip().split('\n'):
+            if not line:
+                continue
+            entry = json.loads(line)
+            if condition_func(entry):
+                return
+        raise AssertionError(f"""No JSON entry matched condition
 ---- Log content ----
 {self.log_content}
 -----------------""")
@@ -137,3 +154,29 @@ class FatraceTests(unittest.TestCase):
 
         # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1)
         f.assert_log(r"^VeryLongTouchCo.*hello\.txt$")
+
+    def test_command_json(self):
+        f = FatraceRunner(["--current-mount", "--command", "touch", "-s", "2", "--json"], self.tmp_path)
+
+        # Create files with different programs
+        subprocess.check_call(["touch", str(self.tmp_path / "includeme")])
+        subprocess.check_call(["dd", "if=/dev/zero", f"of={self.tmp_path}/notme", "bs=1", "count=1", "status=none"])
+
+        f.finish()
+        assert f.log_content
+
+        # Should find touch command accessing includeme
+        includeme_path = str(self.tmp_path / "includeme")
+        f.assert_json(lambda entry: entry.get("path") == includeme_path)
+
+        # Should NOT find dd command or the file it created
+        notme_path = str(self.tmp_path / "notme")
+        for line in f.log_content.strip().split('\n'):
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+                if entry.get("path") == notme_path:
+                    self.fail("dd command or notme file found in JSON log when filtering for touch only")
+            except json.JSONDecodeError:
+                continue
