@@ -1,9 +1,0 @@
-#!/usr/bin/python3
-
-# Minimal touch replacement for use in tests.
-# By not exiting immediately, fatrace is able to gather metadata
-
-import os, sys, time
-with open(sys.argv[1], "a") as f: f.write(" ")
-with open(f"{os.environ['AUTOPKGTEST_TMP']}/touch.exe", "w") as f: f.write(os.readlink("/proc/self/exe"))
-time.sleep(.1)

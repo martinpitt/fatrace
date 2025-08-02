@@ -1,11 +1,13 @@
 CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PREFIX ?= /usr/local
 
+all: fatrace tests/slow-exit.so
+
 fatrace: fatrace.o
 	$(CC) $(LDFLAGS) -o $@ $<
 
 clean:
-	rm -f *.o fatrace
+	rm -f *.o fatrace tests/slow-exit.so
 
 distclean: clean
 
@@ -15,4 +17,8 @@ install: fatrace
 	install -d $(DESTDIR)$(PREFIX)/share/man/man8/
 	install -m 644 *.8 $(DESTDIR)$(PREFIX)/share/man/man8/
 
-.PHONY: clean distclean install
+tests/slow-exit.so: tests/slow-exit.c
+	$(CC) -shared -fPIC -o $@ $< -ldl
+
+
+.PHONY: all clean distclean install
