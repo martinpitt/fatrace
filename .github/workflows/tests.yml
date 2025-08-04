@@ -11,11 +11,20 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
 
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential python3-pip
+          pip install ruff mypy
+
       - name: Build
         run: make
 
       - name: Run tests
         run: sudo python3 -m unittest -v
+
+      - name: Run linters
+        run: make lint
 
   container:
     runs-on: ubuntu-latest

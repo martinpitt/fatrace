@@ -20,5 +20,11 @@ install: fatrace
 tests/slow-exit.so: tests/slow-exit.c
 	$(CC) -shared -fPIC -o $@ $< -ldl
 
+lint:
+	ruff check power-usage-report
+	ruff check tests
+	mypy power-usage-report
+	mypy tests
 
-.PHONY: all clean distclean install
+
+.PHONY: all clean distclean install lint
