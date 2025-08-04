@@ -111,10 +111,12 @@ def group_fatrace_events(events):
             continue
 
         comm = event['comm'] if 'comm' in event else 'unknown'
-        if 'path' in event: path = event['path']
+        if 'path' in event:
+            path = event['path']
         elif 'device' in event:
             path = 'device %i:%i inode %i' % (*event['device'], event['inode'])
-        else: path = 'unknown'
+        else:
+            path = 'unknown'
         stat = groups.setdefault(comm, {}).setdefault(path, [0, 0])
         if 'W' in event['types']:
             stat[1] += 1
@@ -166,7 +168,7 @@ def powertop_report(raw_out):
 
     for (search_header, print_header) in blocks:
         # skip until search_header
-        while i < len(lines) and not search_header in lines[i].lower():
+        while i < len(lines) and search_header not in lines[i].lower():
             i += 1
         i += 1  # skip header
         # skip empty lines
