@@ -50,7 +50,7 @@ def retry_unmount(path: str) -> None:
         raise RuntimeError(f"Failed to unmount {path}")
 
 
-class FatraceRunner:
+class FatraceRunnerAbstract:
     def __init__(self, args: list[str]):
         # we want to support multiple parallel FatraceRunners, so create our own private log dir
         self.log_dir = tempfile.TemporaryDirectory()
@@ -79,39 +79,17 @@ class FatraceRunner:
             self.log_content = f.read()
         self.stderr_content = err
         self.log_dir.cleanup()
+        self.log_converted = [
+            self.convert(line)
+            for line in self.log_content.strip().split('\n')
+            if line]
 
-    def has_log(self, pattern: str) -> bool:
-        """Check if a regex pattern exists in the log content."""
-
-        assert self.log_content, "Need to call run() first"
-
-        return bool(re.search(pattern, self.log_content, re.MULTILINE))
-
-    def assert_log(self, pattern: str) -> None:
-        if self.has_log(pattern):
-            return
-        raise AssertionError(f"Pattern not found in log: {pattern}\n"
-                             "---- Log content ----\n"
-                             f"{self.log_content}\n"
-                             "-----------------")
-
-    def assert_not_log(self, pattern: str) -> None:
-        if not self.has_log(pattern):
-            return
-        raise AssertionError(f"Pattern found in log: {pattern}\n"
-                             "---- Log content ----\n"
-                             f"{self.log_content}\n"
-                             "-----------------")
-
-    def has_json(self, condition_func: Callable[[dict], bool]) -> bool:
-        """Check if any JSON line matches the condition function."""
+    def has_log(self, condition_func: Callable[[dict], bool]) -> bool:
+        """Check if any line matches the condition function."""
 
         assert self.log_content, "Need to call run() first"
 
-        for line in self.log_content.strip().split('\n'):
-            if not line:
-                continue
-            entry = json.loads(line)
+        for entry in self.log_converted:
             try:
                 if condition_func(entry):
                     return True
@@ -120,21 +98,96 @@ class FatraceRunner:
                 pass
         return False
 
-    def assert_json(self, condition_func: Callable[[dict], bool]) -> None:
-        if self.has_json(condition_func):
+    def assert_log(self, condition_func: Callable[[dict], bool]) -> None:
+        if self.has_log(condition_func):
             return
-        raise AssertionError("No JSON entry matched condition\n"
+        raise AssertionError("No entry matched condition\n"
                              "---- Log content ----\n"
                              f"{self.log_content}\n"
                              "-----------------")
 
-    def assert_not_json(self, condition_func: Callable[[dict], bool]) -> None:
-        if not self.has_json(condition_func):
+    def assert_not_log(self, condition_func: Callable[[dict], bool]) -> None:
+        if not self.has_log(condition_func):
             return
-        raise AssertionError("At least one JSON entry matched condition\n"
+        raise AssertionError("At least one entry matched condition\n"
                              "---- Log content ----\n"
                              f"{self.log_content}\n"
                              "-----------------")
+
+class FatraceRunnerText(FatraceRunnerAbstract):
+    def convert(self, line: str):
+        return parse_fatrace_text_line(line)
+
+class FatraceRunnerJson(FatraceRunnerAbstract):
+    def convert(self, line: str):
+        return json.loads(line)
+
+def parse_fatrace_text_line(line):
+    result = {}
+    remaining = line.strip()
+    timestamp_match = re.match(r'^(\d{2}:\d{2}:\d{2}\.\d{6}|\d+\.\d{6})\s+', remaining)
+    if timestamp_match:
+        result['timestamp'] = timestamp_match.group(1)
+        remaining = remaining[timestamp_match.end():]
+    proc_match = re.match(r'([^(]+)\((\d+)\)(?:\s+\[(\d+):(\d+)\])?\s*:\s+', remaining)
+    if not proc_match:
+        raise ValueError(f"Could not parse process info from: {line}")
+    procname = proc_match.group(1)
+    if procname != 'unknown':
+        result['comm'] = procname
+    result['pid'] = int(proc_match.group(2))
+    if proc_match.group(3) is not None:
+        result['uid'] = int(proc_match.group(3))
+        result['gid'] = int(proc_match.group(4))
+    remaining = remaining[proc_match.end():]
+    types_match = re.match(r'([RCWO+D<>]+)\s+', remaining)
+    if types_match:
+        result['types'] = types_match.group(1)
+        remaining = remaining[types_match.end():]
+    device_match = re.match(r'device (\d+):(\d+) inode (\d+)', remaining)
+    if device_match:
+        result['device'] = {'major': int(device_match.group(1)), 'minor': int(device_match.group(2))}
+        result['inode'] = int(device_match.group(3))
+        return result
+    parts = re.split(r'(\s+exe=|\s+,\s*parents)', remaining)
+    if parts and parts[0].strip() and parts[0].strip() != '(deleted)':
+        result['path'] = parts[0].strip()
+    exe_match = re.search(r'\s+exe=([^\s,]+)', remaining)
+    if exe_match:
+        result['exe'] = exe_match.group(1)
+    parents_match = re.search(r',\s*parents=(.+)$', remaining)
+    if parents_match:
+        parents = []
+        for parent_match in re.findall(r'\(([^)]+)\)', parents_match.group(1)):
+            parent = {}
+            pid_match = re.search(r'pid=(\d+)', parent_match)
+            if pid_match:
+                parent['pid'] = int(pid_match.group(1))
+            comm_match = re.search(r'comm=([^\s]+)', parent_match)
+            if comm_match:
+                parent['comm'] = comm_match.group(1)
+            exe_match = re.search(r'exe=([^\s]+)', parent_match)
+            if exe_match:
+                parent['exe'] = exe_match.group(1)
+            if parent:
+                parents.append(parent)
+        if parents:
+            result['parents'] = parents
+    return result
+
+class FatraceRunner:
+    def __init__(self, args: list[str]):
+        self.text_runner = FatraceRunnerText(args)
+        self.json_runner = FatraceRunnerJson(args + ["--json"])
+    def finish(self) -> None:
+        self.text_runner.finish()
+        self.json_runner.finish()
+    def assert_log(self, condition_func: Callable[[dict], bool]) -> None:
+        self.text_runner.assert_log(condition_func)
+        self.json_runner.assert_log(condition_func)
+    def assert_not_log(self, condition_func: Callable[[dict], bool]) -> None:
+        self.text_runner.assert_not_log(condition_func)
+        self.json_runner.assert_not_log(condition_func)
 
 class FatraceTests(unittest.TestCase):
     def setUp(self):
@@ -153,7 +206,6 @@ class FatraceTests(unittest.TestCase):
 
     def test_currentmount(self):
         f = FatraceRunner(["--current-mount", "-s", "2"])
-        f_json = FatraceRunner(["--current-mount", "-s", "2", "--json"])
 
         # Create/write/remove a file
         test_file = self.tmp_path / "test.txt"
@@ -181,80 +233,52 @@ class FatraceTests(unittest.TestCase):
         slow_exe(["rm", str(link_file)])
 
         f.finish()
-        f_json.finish()
 
         cwd = str(self.tmp_path)
         cwd_re = re.escape(cwd)
         test_file_str = str(test_file)
 
         # file creation
-        f.assert_log(rf"^touch.*\sC?W?O\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^touch.*\sC?WO?\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^bash.*\sC?WO?\s+{re.escape(test_file_str)}")
-
-        f_json.assert_json(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "O" in e["types"])
-        f_json.assert_json(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "W" in e["types"])
-        f_json.assert_json(lambda e: e["comm"] == "bash" and e["path"] == test_file_str and "W" in e["types"])
+        f.assert_log(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "O" in e["types"])
+        f.assert_log(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "W" in e["types"])
+        f.assert_log(lambda e: e["comm"] == "bash" and e["path"] == test_file_str and "W" in e["types"])
 
         # file reading
-        f.assert_log(rf"^head.*\sRC?O?\s+{re.escape(test_file_str)}")
-        f_json.assert_json(lambda e: e["comm"] == "head" and e["path"] == test_file_str and "R" in e["types"])
+        f.assert_log(lambda e: e["comm"] == "head" and e["path"] == test_file_str and "R" in e["types"])
 
         # file deletion
-        f.assert_log(rf"^rm.*:\s+D\s+{cwd_re}$")
-        f_json.assert_json(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
+        f.assert_log(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
 
         # directory creation
-        f.assert_log(rf"^touch.*:\s+\+\s+{cwd_re}$")
-        f.assert_log(rf"^mkdir.*:\s+\+\s+{cwd_re}$")
-
-        f_json.assert_json(lambda e: e["comm"] == "touch" and e["path"] == cwd and e["types"] == "+")
-        f_json.assert_json(lambda e: e["comm"] == "mkdir" and e["path"] == cwd and e["types"] == "+")
+        f.assert_log(lambda e: e["comm"] == "touch" and e["path"] == cwd and e["types"] == "+")
+        f.assert_log(lambda e: e["comm"] == "mkdir" and e["path"] == cwd and e["types"] == "+")
 
         # file renaming (can be one or two events)
-        f.assert_log(rf"^mv.*:\s+<>?\s+{cwd_re}$")
-        f.assert_log(rf"^mv.*:\s+<?>\s+{cwd_re}$")
-
-        f_json.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and "<" in e["types"])
-        f_json.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and ">" in e["types"])
+        f.assert_log(lambda e: e["comm"] == "mv" and e["path"] == cwd and "<" in e["types"])
+        f.assert_log(lambda e: e["comm"] == "mv" and e["path"] == cwd and ">" in e["types"])
 
         # file moving between directories
-        f.assert_log(rf"^mv.*:\s+<\s+{cwd_re}$")
-        f.assert_log(rf"^mv.*:\s+>\s+{re.escape(str(dest_dir))}$")
-
-        f_json.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and e["types"] == "<")
-        f_json.assert_json(lambda e: e["comm"] == "mv" and e["path"] == str(dest_dir) and e["types"] == ">")
+        f.assert_log(lambda e: e["comm"] == "mv" and e["path"] == cwd and e["types"] == "<")
+        f.assert_log(lambda e: e["comm"] == "mv" and e["path"] == str(dest_dir) and e["types"] == ">")
 
         # ELOOP symlink operations
-        f.assert_log(rf"^ln.*:\s+\+\s+{cwd_re}$")
-        f.assert_log(rf"^rm.*:\s+D\s+{cwd_re}$")
-
-        f_json.assert_json(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
-        f_json.assert_json(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
+        f.assert_log(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
+        f.assert_log(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
 
     def test_command(self):
         f = FatraceRunner(["--current-mount", "--command", "touch", "-s", "2"])
-        f_json = FatraceRunner(["--current-mount", "--command", "touch", "-s", "2", "--json"])
 
         # Create files with different programs
         slow_exe(["touch", str(self.tmp_path / "includeme")])
         slow_exe(["dd", "if=/dev/zero", f"of={self.tmp_path}/notme", "bs=1", "count=1", "status=none"])
 
         f.finish()
-        f_json.finish()
-        assert f.log_content
-        assert f_json.log_content
 
-        # Check text log: should find touch command, but not dd nor the file it created
-        f.assert_log(r"^touch.*includeme$")
-        self.assertNotIn("notme", f.log_content)
-        self.assertNotRegex(f.log_content, re.compile(r"^dd", re.MULTILINE))
-
-        # Check JSON log
+        # Check log: should find touch command, but not dd nor the file it created
         includeme_path = str(self.tmp_path / "includeme")
-        f_json.assert_json(lambda e: e["path"] == includeme_path)
-        self.assertNotIn("notme", f_json.log_content)
-        self.assertNotIn('"dd"', f_json.log_content)
+        f.assert_log(lambda e: e["comm"]=="touch" and  e["path"] == includeme_path)
+        f.assert_not_log(lambda e: e["comm"]=="dd")
+        f.assert_not_log(lambda e: "notme" in e["path"])
 
     def test_command_long_name(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)
@@ -266,7 +290,7 @@ class FatraceTests(unittest.TestCase):
         f.finish()
 
         # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1)
-        f.assert_log(rf"^VeryLongTouchCo\(.*C?WO?\s+{str(self.tmp_path)}/hello\.txt$")
+        f.assert_log(lambda e: e["comm"]=="VeryLongTouchCo" and "W" in e["types"] and e["path"]==f"{str(self.tmp_path)}/hello.txt")
 
     def test_btrfs(self):
         if not shutil.which("mkfs.btrfs"):
@@ -321,33 +345,32 @@ class FatraceTests(unittest.TestCase):
         mount_str = str(mount_dir)
 
         # world.txt access
-        f.assert_log(rf"RC?O?\s+{re.escape(str(mount_dir / 'world.txt'))}$")
+        f.assert_log(lambda e: "R" in e["types"] and e["path"]==str(mount_dir / 'world.txt'))
 
         # file operations on main filesystem
         test_file_str = str(test_file)
-        f.assert_log(rf"^touch.*\sC?W?O\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^touch.*\sC?WO?\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^bash.*\sC?WO?\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^rm.*\sD?\s+{re.escape(mount_str)}")
+        f.assert_log(lambda e: e["comm"]=="touch" and "O" in e["types"] and e["path"]==test_file_str)
+        f.assert_log(lambda e: e["comm"]=="touch" and "W" in e["types"] and e["path"]==test_file_str)
+        f.assert_log(lambda e: e["comm"]=="bash" and "W" in e["types"] and e["path"]==test_file_str)
+        f.assert_log(lambda e: e["comm"]=="rm" and e["types"] in ["", "D"] and e["path"]==mount_str)
 
         # directory creation
-        f.assert_log(rf"^touch.*:\s+\+\s+{re.escape(mount_str)}$")
-        f.assert_log(rf"^mkdir.*:\s+\+\s+{re.escape(mount_str)}$")
+        f.assert_log(lambda e: e["comm"]=="touch" and e["types"] == "+" and e["path"]==mount_str)
+        f.assert_log(lambda e: e["comm"]=="mkdir" and e["types"] == "+" and e["path"]==mount_str)
 
         # file renaming (can be one or two events)
-        f.assert_log(rf"^mv.*:\s+<>?\s+{re.escape(mount_str)}$")
-        f.assert_log(rf"^mv.*:\s+<?>\s+{re.escape(mount_str)}$")
+        f.assert_log(lambda e: e["comm"]=="mv" and "<" in e["types"] and e["path"]==mount_str)
+        f.assert_log(lambda e: e["comm"]=="mv" and ">" in e["types"] and e["path"]==mount_str)
 
         # file moving
-        f.assert_log(rf"^mv.*:\s+<\s+{re.escape(mount_str)}$")
-        f.assert_log(rf"^mv.*:\s+>\s+{re.escape(str(dest_dir))}$")
+        f.assert_log(lambda e: e["comm"]=="mv" and e["types"]=="<" and e["path"]==mount_str)
+        f.assert_log(lambda e: e["comm"]=="mv" and e["types"]==">" and e["path"]==str(dest_dir))
 
         # subvolume file creation
-        f.assert_log(rf"^touch.*\sC?W?O\s+{re.escape(str(subvol_file))}")
+        f.assert_log(lambda e: e["comm"]=="touch" and "O" in e["types"] and e["path"]==str(subvol_file))
 
     def test_exe_parents(self):
         f = FatraceRunner(["--current-mount", "-s", "2", "--parents", "--exe"])
-        f_json = FatraceRunner(["--current-mount", "-s", "2", "--json", "--parents", "--exe"])
 
         # Create complex parent chain: touch → bash → python3 → test
         test_file = self.tmp_path / "file.tmp"
@@ -362,7 +385,6 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         slow_exe([sys.executable, "-c", python_script])
 
         f.finish()
-        f_json.finish()
 
         # Read process information
         bash_pid = int(bash_pid_file.read_text().strip())
@@ -377,17 +399,8 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         init_comm = Path("/proc/1/comm").read_text().strip()
         init_exe = Path("/proc/1/exe").resolve()
 
-        # Check text log for parent chain
-        f.assert_log(
-            rf"^touch.*exe={re.escape(str(touch_exe))}, "
-            rf"parents=\(pid={bash_pid} comm=bash exe={re.escape(str(bash_exe))}\),"
-            rf"\(pid={python_pid} comm=python3 exe={re.escape(str(python_exe))}\),"
-            rf"\(pid={test_pid} .* exe={re.escape(str(test_exe))}\),.*"
-            rf"\(pid=1 comm={init_comm} exe={re.escape(str(init_exe))}\)"
-        )
-
         # Check JSON log for parent chain
-        f_json.assert_json(lambda e: (
+        f.assert_log(lambda e: (
             e["comm"] == "touch" and
             e["path"] == str(test_file) and
             e["exe"] == str(touch_exe) and
@@ -408,7 +421,6 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
 
         # Test user tracking functionality
         f = FatraceRunner(["--current-mount", "--user", "-s", "4"])
-        f_json = FatraceRunner(["--current-mount", "--user", "-s", "4", "--json"])
 
         def slow_exe_nobody(argv: list[str], **kwargs) -> None:
             exe(["runuser", "-u", "nobody",
@@ -436,61 +448,50 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         slow_exe_nobody(["rm", str(test_file_user)])
 
         f.finish()
-        f_json.finish()
-        assert f.log_content
-        assert f_json.log_content
 
         test_file_str = str(test_file)
         test_file_root_str = str(test_file_root)
         test_file_user_str = str(test_file_user)
 
         # Reading the test file as root [0:0]
-        f.assert_log(rf"^head.*\[0:0\].*RC?O?\s+{re.escape(test_file_str)}$")
-
-        f_json.assert_json(lambda e: (
+        f.assert_log(lambda e: (
             e["comm"] == "head" and
             e["uid"] == 0 and
             e["gid"] == 0 and
-            re.match(r"^RC?O?$", e["types"]) is not None and
+            "R" in e["types"] and
             e["path"] == test_file_str
         ))
 
         # Reading the test file as user nobody [uid:gid]
-        f.assert_log(rf"^tail.*\[{nobody_uid}:{nobody_gid}\].*RC?O?\s+{re.escape(test_file_str)}$")
-
-        f_json.assert_json(lambda e: (
+        f.assert_log(lambda e: (
             e["comm"] == "tail" and
             e["uid"] == nobody_uid and
             e["gid"] == nobody_gid and
-            re.match(r"^RC?O?$", e["types"]) is not None and
+            "R" in e["types"] and
             e["path"] == test_file_str
         ))
 
         # File creation as root [0:0]
-        f.assert_log(rf"^touch.*\[0:0\].*C?W?O\s+{re.escape(test_file_root_str)}$")
-
-        f_json.assert_json(lambda e: (
+        f.assert_log(lambda e: (
             e["comm"] == "touch" and
             e["uid"] == 0 and
             e["gid"] == 0 and
-            re.match(r"^C?W?O$", e["types"]) is not None and
+            "O" in e["types"] and
             e["path"] == test_file_root_str
         ))
 
         # File creation as user nobody [uid:gid]
-        f.assert_log(rf"^touch.*\[{nobody_uid}:{nobody_gid}\].*C?W?O\s+{re.escape(test_file_user_str)}$")
-
-        f_json.assert_json(lambda e: (
+        f.assert_log(lambda e: (
             e["comm"] == "touch" and
             e["uid"] == nobody_uid and
             e["gid"] == nobody_gid and
-            re.match(r"^C?W?O$", e["types"]) is not None and
+            "O" in e["types"] and
             e["path"] == test_file_user_str
         ))
 
     def test_json(self):
         """JSON-specific features like path_raw, UTF-8 handling, device/inode, etc."""
-        f_json = FatraceRunner(["--current-mount", "--user", "-s", "10", "--json"])
+        f_json = FatraceRunnerJson(["--current-mount", "--user", "-s", "10", "--json"])
 
         # Test 1: Basic path tracking
         good_file = self.tmp_path / "1-good.tmp"
@@ -556,24 +557,23 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             created_utf8_files.append((expected, full_filename_bytes, description))
 
         f_json.finish()
-        assert f_json.log_content
 
         # Test 1: Basic path tracking
-        f_json.assert_json(lambda e: e["comm"] == "touch" and e["path"] == str(good_file))
+        f_json.assert_log(lambda e: e["comm"] == "touch" and e["path"] == str(good_file))
 
         # Test 2: path_raw for non-UTF8 paths
         # For files with invalid UTF-8, should have path_raw instead of path
-        f_json.assert_json(lambda e: e["comm"] == "touch" and
+        f_json.assert_log(lambda e: e["comm"] == "touch" and
                            e["path_raw"] == list(str(bad_file).encode('utf-8')) and
                            "path" not in e)
 
         # Test 3: pid tracking
         recorded_pid = int(pid_file.read_text().strip())
-        f_json.assert_json(lambda e: e["comm"] == "bash" and e["pid"] == recorded_pid and e["path"] == str(pid_file))
+        f_json.assert_log(lambda e: e["comm"] == "bash" and e["pid"] == recorded_pid and e["path"] == str(pid_file))
 
         # Test 4: device and inode tracking
         stat_result = device_file.stat()
-        f_json.assert_json(lambda e: (
+        f_json.assert_log(lambda e: (
             e["comm"] == "touch" and
             e["path"] == str(device_file) and
             e["device"] == {"major": os.major(stat_result.st_dev), "minor": os.minor(stat_result.st_dev)} and
@@ -588,7 +588,7 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             if expected == "good":
                 # Good UTF-8: should be decodable and have "path" field, should NOT have "path_raw"
                 file_path_str = full_path_bytes.decode('utf-8')
-                f_json.assert_json(lambda e, filepath=file_path_str: (
+                f_json.assert_log(lambda e, filepath=file_path_str: (
                     e["comm"] == "touch" and
                     "comm_raw" not in e and
                     e["path"] == filepath and
@@ -598,7 +598,7 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             elif expected == "bad":
                 # Bad UTF-8: should NOT be decodable and should have "path_raw" field as byte array
                 file_bytes_list = list(full_path_bytes)
-                f_json.assert_json(lambda e, filebytes=file_bytes_list: (
+                f_json.assert_log(lambda e, filebytes=file_bytes_list: (
                     e["comm"] == "touch" and
                     "comm_raw" not in e and
                     e["path_raw"] == filebytes and
@@ -617,7 +617,6 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         exe(["mkdir", no2])
 
         f = FatraceRunner(["-s", "3", "--dir", yes1, "--dir", yes2])
-        f_json = FatraceRunner(["-s", "3", "--json", "--dir", yes1, "--dir", yes2])
 
         slow_exe(["mkdir", f"{yes1}/sub"])
         slow_exe(["mkdir", f"{yes2}/sub"])
@@ -640,31 +639,20 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         slow_exe(["touch", f"{no1}/sub_moved/fileB"])
 
         f.finish()
-        f_json.finish()
 
-        assert "Directories are too many to watch separately." not in f.stderr_content
-        assert "Directories are too many to watch separately." not in f_json.stderr_content
+        assert "Directories are too many to watch separately." not in f.text_runner.stderr_content
+        assert "Directories are too many to watch separately." not in f.json_runner.stderr_content
 
-        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/fileA")
-        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/sub/fileB")
-        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes2)}/fileC")
-        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes2)}/sub/fileD")
-        f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yes1)}/sub_moved/fileF")
-        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/fileE")
-        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/sub/fileF")
-        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no2)}/fileG")
-        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no2)}/sub/fileH")
-        f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(no1)}/sub_moved/fileB")
-        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/fileA")
-        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/sub/fileB")
-        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/fileC")
-        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/sub/fileD")
-        f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/sub_moved/fileF")
-        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/fileE")
-        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/sub/fileF")
-        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/fileG")
-        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/sub/fileH")
-        f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/sub_moved/fileB")
+        f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/fileA")
+        f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/sub/fileB")
+        f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/fileC")
+        f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes2}/sub/fileD")
+        f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yes1}/sub_moved/fileF")
+        f.assert_not_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/fileE")
+        f.assert_not_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no1}/sub/fileF")
+        f.assert_not_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/fileG")
+        f.assert_not_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/sub/fileH")
+        f.assert_not_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{no2}/sub_moved/fileB")
 
     def test_dir_many(self):
         yesmany = str(self.tmp_path / "yes-many")
@@ -678,7 +666,6 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             exe(["touch", f"{nomany}/existing-dir-{i}/file"])
 
         f = FatraceRunner(["-s", "3", "--dir", yesmany])
-        f_json = FatraceRunner(["-s", "3", "--json", "--dir", yesmany])
 
         for i in range(5):
             slow_exe(["touch", f"{yesmany}/existing-dir-{i}/file"])
@@ -689,20 +676,15 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             slow_exe(["touch", f"{nomany}/new-dir-{i}/file"])
 
         f.finish()
-        f_json.finish()
 
-        assert "Directories are too many to watch separately." in f.stderr_content
-        assert "Directories are too many to watch separately." in f_json.stderr_content
+        assert "Directories are too many to watch separately." in f.text_runner.stderr_content
+        assert "Directories are too many to watch separately." in f.json_runner.stderr_content
 
         for i in range(5):
-            f.assert_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(yesmany)}/existing-dir-{i}/file")
-            f.assert_log(rf"^touch\([0-9]*\): CW?O? +{re.escape(yesmany)}/new-dir-{i}/file")
-            f.assert_not_log(rf"^touch\([0-9]*\): C?WO? +{re.escape(nomany)}/existing-dir-{i}/file")
-            f.assert_not_log(rf"^touch\([0-9]*\): CW?O? +{re.escape(nomany)}/new-dir-{i}/file")
-            f_json.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yesmany}/existing-dir-{i}/file")
-            f_json.assert_json(lambda e: e["comm"] == "touch" and "C" in e["types"] and e["path"] == f"{yesmany}/new-dir-{i}/file")
-            f_json.assert_not_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{nomany}/existing-dir-{i}/file")
-            f_json.assert_not_json(lambda e: e["comm"] == "touch" and "C" in e["types"] and e["path"] == f"{nomany}/new-dir-{i}/file")
+            f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{yesmany}/existing-dir-{i}/file")
+            f.assert_log(lambda e: e["comm"] == "touch" and "C" in e["types"] and e["path"] == f"{yesmany}/new-dir-{i}/file")
+            f.assert_not_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == f"{nomany}/existing-dir-{i}/file")
+            f.assert_not_log(lambda e: e["comm"] == "touch" and "C" in e["types"] and e["path"] == f"{nomany}/new-dir-{i}/file")
 
     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
@@ -726,16 +708,16 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         head_binary = which("head")
 
         # opening the head binary
-        f.assert_log(rf"RC?O?\s+{re.escape(head_binary)}$")
+        f.assert_log(lambda e: "R" in e["types"] and e["path"] == head_binary)
         # head accessing /etc/passwd
-        f.assert_log(r"RC?O?\s+/etc/passwd$")
+        f.assert_log(lambda e: "R" in e["types"] and e["path"] == "/etc/passwd")
 
         # create a file
         test_file_str = str(test_file)
-        f.assert_log(rf"^touch.*C?W?O\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^touch.*C?WO?\s+{re.escape(test_file_str)}")
-        f.assert_log(rf"^bash.*C?WO?\s+{re.escape(test_file_str)}")
+        f.assert_log(lambda e: e["comm"] == "touch" and "O" in e["types"] and e["path"] == test_file_str)
+        f.assert_log(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == test_file_str)
+        f.assert_log(lambda e: e["comm"] == "bash" and "W" in e["types"] and e["path"] == test_file_str)
 
         # remove file
-        f.assert_log(r"^touch.*:\s+\+\s+/tmp$")
-        f.assert_log(r"^rm.*:\s+D\s+/tmp$")
+        f.assert_log(lambda e: e["comm"] == "touch" and e["types"] == "+" and e["path"] == "/tmp")
+        f.assert_log(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == "/tmp")
