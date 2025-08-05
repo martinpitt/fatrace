@@ -54,7 +54,8 @@ class FatraceRunner:
         self.output_file = os.path.join(self.log_dir.name, "fatrace.log")
         self.log_content: str | None = None
 
-        self.process = subprocess.Popen([str(ROOTDIR / "fatrace"), "-o", str(self.output_file)] + args)
+        fatrace_bin = "fatrace" if os.getenv("FATRACE_INSTALLED_TEST") else str(ROOTDIR / "fatrace")
+        self.process = subprocess.Popen([fatrace_bin, "-o", str(self.output_file)] + args)
         # wait until fatrace starts
         while not os.path.exists(self.output_file):
             time.sleep(0.1)
