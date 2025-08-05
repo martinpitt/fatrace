@@ -18,6 +18,9 @@ ROOTDIR = TESTDIR.parent.resolve()
 
 exe = subprocess.check_call
 
+# check if root fs is btrfs
+root_is_btrfs = subprocess.check_output(["findmnt", "--noheadings", "--output=FSTYPE", "/"]).strip() == b"btrfs"
+
 
 def slow_exe(argv: list[str], **kwargs) -> None:
     """Run a command with tests/slow-exit.so
@@ -573,6 +576,7 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
 
     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
+    @unittest.skipIf(root_is_btrfs, "FANOTIFY does not work on btrfs, https://github.com/martinpitt/fatrace/issues/3")
     def test_all_mounts(self):
         f = FatraceRunner(["-s", "2"])
 
