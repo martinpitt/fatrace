@@ -1,0 +1,14 @@
+summary: integration test
+duration: 10m
+require:
+  - fatrace
+  - python3
+  - make
+  - gcc
+test: |
+  set -ex
+  # need to be in project root dir
+  cd ..
+  # build so that we get the slow-exit.so preload lib
+  make
+  env FATRACE_INSTALLED_TEST=1 python3 -m unittest -v
