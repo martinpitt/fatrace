@@ -277,7 +277,7 @@ class FatraceTests(unittest.TestCase):
         f.assert_log(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
 
     def test_command(self):
-        f = FatraceRunnerTextStructured(["--current-mount", "--command", "touch", "-s", "2"])
+        f = FatraceRunnerTextRegex(["--current-mount", "--command", "touch", "-s", "2"])
         f_json = FatraceRunnerJson(["--current-mount", "--command", "touch", "-s", "2", "--json"])
 
         # Create files with different programs
