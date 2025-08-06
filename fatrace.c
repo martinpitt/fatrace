@@ -535,6 +535,8 @@ print_event (const struct fanotify_event_metadata *data,
                             print_json_str("exe", exepath);
                         } else
                           printf(" exe=%s", exepath);
+                    } else {
+                        warn("failed to readlink /proc/%i/exe", ppid);
                     }
                 }
                 /* get next parent */
