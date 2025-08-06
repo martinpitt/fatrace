@@ -246,7 +246,6 @@ class FatraceTests(unittest.TestCase):
         f.finish()
 
         cwd = str(self.tmp_path)
-        cwd_re = re.escape(cwd)
         test_file_str = str(test_file)
 
         # file creation
