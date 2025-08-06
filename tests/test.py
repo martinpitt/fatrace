@@ -49,10 +49,11 @@ def retry_unmount(path: str) -> None:
     else:
         raise RuntimeError(f"Failed to unmount {path}")
 
-
-class FatraceRunnerAbstract:
-    def __init__(self, args: list[str]):
+class FatraceRunnerBase:
+    def __init__(self, args: list[str], convert_line = lambda x: x, convert_condition = lambda x: x):
         # we want to support multiple parallel FatraceRunners, so create our own private log dir
+        self.convert_line = convert_line
+        self.convert_condition = convert_condition
         self.log_dir = tempfile.TemporaryDirectory()
         self.output_file = os.path.join(self.log_dir.name, "fatrace.log")
         self.log_content: str | None = None
@@ -115,23 +116,11 @@ class FatraceRunnerAbstract:
                              f"{self.log_content}\n"
                              "-----------------")
 
-    def convert_line(self, line: str):
-        return line
+def FatraceRunnerText(args: list[str]):
+    return FatraceRunnerBase(args, convert_condition = lambda regex: lambda line: bool(re.search(regex, line)))
 
-    def convert_condition(self, condition):
-        return condition
-
-class FatraceRunnerTextRegex(FatraceRunnerAbstract):
-    def convert_condition(self, condition):
-        return lambda line: bool(re.search(condition, line))
-
-class FatraceRunnerTextStructured(FatraceRunnerAbstract):
-    def convert_line(self, line: str):
-        return parse_fatrace_text_line(line)
-
-class FatraceRunnerJson(FatraceRunnerAbstract):
-    def convert_line(self, line: str):
-        return json.loads(line)
+def FatraceRunnerJson(args: list[str]):
+    return FatraceRunnerBase(args, convert_line = json.loads)
 
 def parse_fatrace_text_line(line):
     result = {}
@@ -188,7 +177,7 @@ def parse_fatrace_text_line(line):
 
 class FatraceRunner:
     def __init__(self, args: list[str]):
-        self.text_runner = FatraceRunnerTextStructured(args)
+        self.text_runner = FatraceRunnerBase(args, convert_line = parse_fatrace_text_line)
         self.json_runner = FatraceRunnerJson(args + ["--json"])
     def finish(self) -> None:
         self.text_runner.finish()
@@ -276,7 +265,7 @@ class FatraceTests(unittest.TestCase):
         f.assert_log(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
 
     def test_command(self):
-        f = FatraceRunnerTextRegex(["--current-mount", "--command", "touch", "-s", "2"])
+        f = FatraceRunnerText(["--current-mount", "--command", "touch", "-s", "2"])
         f_json = FatraceRunnerJson(["--current-mount", "--command", "touch", "-s", "2", "--json"])
 
         # Create files with different programs
