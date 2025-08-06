@@ -80,15 +80,16 @@ class FatraceRunnerAbstract:
         self.stderr_content = err
         self.log_dir.cleanup()
         self.log_converted = [
-            self.convert(line)
+            self.convert_line(line)
             for line in self.log_content.strip().split('\n')
             if line]
 
-    def has_log(self, condition_func: Callable[[dict], bool]) -> bool:
-        """Check if any line matches the condition function."""
+    def has_log(self, condition) -> bool:
+        """Check if any line matches the condition."""
 
         assert self.log_content, "Need to call run() first"
 
+        condition_func = self.convert_condition(condition)
         for entry in self.log_converted:
             try:
                 if condition_func(entry):
@@ -98,28 +99,38 @@ class FatraceRunnerAbstract:
                 pass
         return False
 
-    def assert_log(self, condition_func: Callable[[dict], bool]) -> None:
-        if self.has_log(condition_func):
+    def assert_log(self, condition) -> None:
+        if self.has_log(condition):
             return
         raise AssertionError("No entry matched condition\n"
                              "---- Log content ----\n"
                              f"{self.log_content}\n"
                              "-----------------")
 
-    def assert_not_log(self, condition_func: Callable[[dict], bool]) -> None:
-        if not self.has_log(condition_func):
+    def assert_not_log(self, condition) -> None:
+        if not self.has_log(condition):
             return
         raise AssertionError("At least one entry matched condition\n"
                              "---- Log content ----\n"
                              f"{self.log_content}\n"
                              "-----------------")
 
-class FatraceRunnerText(FatraceRunnerAbstract):
-    def convert(self, line: str):
+    def convert_line(self, line: str):
+        return line
+
+    def convert_condition(self, condition):
+        return condition
+
+class FatraceRunnerTextRegex(FatraceRunnerAbstract):
+    def convert_condition(self, condition):
+        return lambda line: bool(re.search(condition, line))
+
+class FatraceRunnerTextStructured(FatraceRunnerAbstract):
+    def convert_line(self, line: str):
         return parse_fatrace_text_line(line)
 
 class FatraceRunnerJson(FatraceRunnerAbstract):
-    def convert(self, line: str):
+    def convert_line(self, line: str):
         return json.loads(line)
 
 def parse_fatrace_text_line(line):
@@ -177,7 +188,7 @@ def parse_fatrace_text_line(line):
 
 class FatraceRunner:
     def __init__(self, args: list[str]):
-        self.text_runner = FatraceRunnerText(args)
+        self.text_runner = FatraceRunnerTextStructured(args)
         self.json_runner = FatraceRunnerJson(args + ["--json"])
     def finish(self) -> None:
         self.text_runner.finish()
@@ -266,19 +277,26 @@ class FatraceTests(unittest.TestCase):
         f.assert_log(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
 
     def test_command(self):
-        f = FatraceRunner(["--current-mount", "--command", "touch", "-s", "2"])
+        f = FatraceRunnerTextStructured(["--current-mount", "--command", "touch", "-s", "2"])
+        f_json = FatraceRunnerJson(["--current-mount", "--command", "touch", "-s", "2", "--json"])
 
         # Create files with different programs
         slow_exe(["touch", str(self.tmp_path / "includeme")])
         slow_exe(["dd", "if=/dev/zero", f"of={self.tmp_path}/notme", "bs=1", "count=1", "status=none"])
 
         f.finish()
+        f_json.finish()
 
-        # Check log: should find touch command, but not dd nor the file it created
+        # Check text log: should find touch command, but not dd nor the file it created
+        f.assert_log(r"^touch.*includeme$")
+        f.assert_not_log(r"notme")
+        f.assert_not_log(r"^dd")
+
+        # Check JSON log
         includeme_path = str(self.tmp_path / "includeme")
-        f.assert_log(lambda e: e["comm"]=="touch" and  e["path"] == includeme_path)
-        f.assert_not_log(lambda e: e["comm"]=="dd")
-        f.assert_not_log(lambda e: "notme" in e["path"])
+        f_json.assert_log(lambda e: e["path"] == includeme_path)
+        f_json.assert_not_log(lambda e: "notme" in e["path"])
+        f_json.assert_not_log(lambda e: e["comm"]=="dd")
 
     def test_command_long_name(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)
@@ -395,7 +413,6 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         touch_exe = which("touch")
         bash_exe = which("bash")
         python_exe = which("python3")
-        test_exe = Path("/proc/self/exe").resolve()
         init_comm = Path("/proc/1/comm").read_text().strip()
         init_exe = Path("/proc/1/exe").resolve()
 
