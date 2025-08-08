@@ -191,9 +191,8 @@ Ignore events for this process ID. Can be specified multiple times.
 .TP
 .B \-f \fITYPES\fR, \fB\-\-filter=\fITYPES
 Show only the given event types. \fBTYPES\fR is a list of
-.BR C ", " R ", " O ", " W ", " D ", " + ", or " <
-with the above meanings. \fB<\fR and \fB>\fR both mean "move" and will always
-enable both directions.
+.BR C ", " R ", " O ", " W ", " D ", " + ", " < ", or " >
+with the above meanings.
 
 E. g. use \fB\-\-filter=OC\fR to only show open and close events.
 
@@ -212,6 +211,13 @@ Print information about all parent processes.
 .TP
 .B \-e\fR, \fB\-\-exe
 Print executable path.
+
+.TP
+.B \-d\fR, \fB\-\-dir
+Show only events where the affected file is under this path. Can be specified
+multiple times to include events from several paths. If the directories
+contained under these paths are sufficiently few (4096 or less), the events are
+filtered by the kernel.
 
 .TP
 .B \-h \fR, \fB\-\-help
