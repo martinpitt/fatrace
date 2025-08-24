@@ -656,7 +656,7 @@ help (void)
 "  -f TYPES, --filter=TYPES\tShow only the given event types; choose from C, R, O, W, +, D, < or >, e. g. --filter=OC.\n"
 "  -C COMM, --command=COMM\tShow only events for this command.\n"
 "  -j, --json\t\t\tWrite events in JSONL format.\n"
-"  -P, --parents\t\tInclude information about all parent processes.\n"
+"  -P, --parents\t\t\tInclude information about all parent processes.\n"
 "  -e, --exe\t\t\tAdd executable path to events.\n"
 "  -h, --help\t\t\tShow help.");
 }
