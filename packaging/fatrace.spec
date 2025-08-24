@@ -29,7 +29,7 @@ make install DESTDIR=%{buildroot}
 mv %{buildroot}%{_prefix}/sbin %{buildroot}%{_bindir}
 
 %files
-%doc COPYING NEWS
+%doc COPYING
 %{_bindir}/fatrace
 %{_bindir}/power-usage-report
 %{_mandir}/man*/*
