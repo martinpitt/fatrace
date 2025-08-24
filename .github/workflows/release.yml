@@ -12,7 +12,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Create GitHub release
-        uses: docker://antonyurchenko/git-release:latest
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CHANGELOG_FILE: "NEWS"
+        run: gh release create "$GITHUB_REF_NAME" --notes-from-tag
