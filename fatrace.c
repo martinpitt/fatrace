@@ -54,6 +54,8 @@
 #define TASK_COMM_LEN 16
 #endif
 
+#define MAX_DIRS 1024
+
 #define DEBUG 0
 #if DEBUG
 #define debug(fmt, ...) fprintf (stderr, "DEBUG: " fmt "\n", ##__VA_ARGS__)
@@ -74,8 +76,8 @@ static char* option_comm = NULL;
 static bool option_json = false;
 static bool option_parents = false;
 static bool option_exe = false;
-static const char *option_dirs[1024];
-static int option_dir_lens[1024];
+static const char *option_dirs[MAX_DIRS];
+static int option_dir_lens[MAX_DIRS];
 static bool dir_watch_mode = false;
 static unsigned int option_dirs_len = 0;
 
@@ -246,7 +248,8 @@ show_pid (pid_t pid)
 static bool
 show_path (const char* path)
 {
-    if (option_dirs_len == 0) return true;
+    if (option_dirs_len == 0)
+        return true;
     int plen = strlen(path);
     for (unsigned int i = 0; i < option_dirs_len; i++) {
         const char* compare_to_dir = option_dirs[i];
@@ -914,8 +917,7 @@ parse_args (int argc, char** argv)
                 break;
 
             case 'd':
-                if (option_dirs_len
-                    < (sizeof (option_dirs) / sizeof (option_dirs[0]))) {
+                if (option_dirs_len < MAX_DIRS) {
                     const char* path = optarg;
                     int plen = strlen(path);
                     if (plen == 0)

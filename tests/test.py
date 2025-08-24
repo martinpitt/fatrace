@@ -72,8 +72,7 @@ class FatraceRunner:
         """Wait for fatrace to finish and read the log content."""
 
         # fallback timeout; tests should use -s
-        self.process.wait(timeout=10)
-        out, err = self.process.communicate()
+        out, err = self.process.communicate(timeout=10)
         assert out == ""
         with open(self.output_file, 'r') as f:
             self.log_content = f.read()
