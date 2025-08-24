@@ -917,41 +917,39 @@ parse_args (int argc, char** argv)
                 break;
 
             case 'd':
-                if (option_dirs_len < MAX_DIRS) {
-                    const char* path = optarg;
-                    int plen = strlen(path);
-                    if (plen == 0)
-                        errx (EXIT_FAILURE, "Error: Empty dir given");
-                    if (plen >= PATH_MAX)
-                        errx (EXIT_FAILURE, "Error: Dir too long: %s", path);
-                    if (path[0] != '/')
-                        errx (EXIT_FAILURE, "Error: Dir must be absolute: %s",
-                              path);
-                    if (plen == 1)
-                        errx (EXIT_FAILURE,
-                              "Error: Dir must not be filesystem root. To"
-                              " include all dirs, instead remove all -d,--dir"
-                              " options.");
-                    if (path[plen - 1] == '/')
-                        errx (EXIT_FAILURE,
-                              "Error: Dir must not end with a slash: %s", path);
-                    for (int i = 0; i < plen - 1; i++)
-                        if (path[i] == '/' && path[i + 1] == '/')
-                            errx (EXIT_FAILURE,
-                                  "Error: Dir must not contain double slashes:"
-                                  " %s", path);
-                    // Check that dir exists
-                    int path_fd = open (path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
-                    if (path_fd < 0) {
-                        err (EXIT_FAILURE, "Error: Cannot open dir %s", path);
-                    }
-                    close (path_fd);
-                    option_dirs[option_dirs_len] = path;
-                    option_dir_lens[option_dirs_len] = plen;
-                    option_dirs_len++;
-                }
-                else
+                if (option_dirs_len >= MAX_DIRS)
                     errx (EXIT_FAILURE, "Error: Too many dirs");
+                const char* path = optarg;
+                int plen = strlen(path);
+                if (plen == 0)
+                    errx (EXIT_FAILURE, "Error: Empty dir given");
+                if (plen >= PATH_MAX)
+                    errx (EXIT_FAILURE, "Error: Dir too long: %s", path);
+                if (path[0] != '/')
+                    errx (EXIT_FAILURE, "Error: Dir must be absolute: %s",
+                          path);
+                if (plen == 1)
+                    errx (EXIT_FAILURE,
+                          "Error: Dir must not be filesystem root. To"
+                          " include all dirs, instead remove all -d,--dir"
+                          " options.");
+                if (path[plen - 1] == '/')
+                    errx (EXIT_FAILURE,
+                          "Error: Dir must not end with a slash: %s", path);
+                for (int i = 0; i < plen - 1; i++)
+                    if (path[i] == '/' && path[i + 1] == '/')
+                        errx (EXIT_FAILURE,
+                              "Error: Dir must not contain double slashes:"
+                              " %s", path);
+                // Check that dir exists
+                int path_fd = open (path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+                if (path_fd < 0) {
+                    err (EXIT_FAILURE, "Error: Cannot open dir %s", path);
+                }
+                close (path_fd);
+                option_dirs[option_dirs_len] = path;
+                option_dir_lens[option_dirs_len] = plen;
+                option_dirs_len++;
                 break;
 
             case 'h':
