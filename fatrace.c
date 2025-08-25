@@ -530,6 +530,8 @@ print_event (const struct fanotify_event_metadata *data,
                             print_json_str("exe", exepath);
                         } else
                           printf(" exe=%s", exepath);
+                    } else {
+                        // todo warn
                     }
                 }
                 /* get next parent */
