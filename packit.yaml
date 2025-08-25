@@ -50,30 +50,22 @@ jobs:
       - centos-stream-9-x86_64
       - centos-stream-10-x86_64
 
-# needs coordination with Fedora maintainer first, and handling the sbin patch
-#  - job: propose_downstream
-#    trigger: release
-#    packages: [fatrace-fedora]
-#    dist_git_branches:
-#      - fedora-development
-#      - fedora-stable
-#
-#  - job: propose_downstream
-#    trigger: release
-#    packages: [fatrace-centos]
-#    dist_git_branches:
-#      - c9s
-#      - c10s
-#
-#  - job: koji_build
-#    trigger: commit
-#    packages: [fatrace-fedora]
-#    dist_git_branches:
-#      - fedora-all
-#
-#  - job: bodhi_update
-#    trigger: commit
-#    packages: [fatrace-fedora]
-#    dist_git_branches:
-#      # rawhide updates are created automatically
-#      - fedora-branched
+ - job: propose_downstream
+   trigger: release
+   packages: [fatrace-fedora]
+   dist_git_branches:
+     - fedora-development
+     - fedora-stable
+
+ - job: koji_build
+   trigger: commit
+   packages: [fatrace-fedora]
+   dist_git_branches:
+     - fedora-all
+
+ - job: bodhi_update
+   trigger: commit
+   packages: [fatrace-fedora]
+   dist_git_branches:
+     # rawhide updates are created automatically
+     - fedora-branched
