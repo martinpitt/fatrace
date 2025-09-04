@@ -749,8 +749,10 @@ parse_args (int argc, char** argv)
                             option_filter_mask |= FAN_DELETE;
                             break;
                         case '<':
+                            option_filter_mask |= FAN_MOVED_FROM;
+                            break;
                         case '>':
-                            option_filter_mask |= FAN_MOVE;
+                            option_filter_mask |= FAN_MOVED_TO;
                             break;
 #endif
                         default:
