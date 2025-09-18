@@ -599,6 +599,7 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
 
         fs = [
             FatraceRunner("-s", "3", "-d", yes1, f"--dir={yes2}", "--json"),
+            FatraceRunner("-s", "3", "--json", "-d", yes1, "--", yes2),
             FatraceRunner("-s", "3", "--json", "--", yes1, yes2),
         ]
 
