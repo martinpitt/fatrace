@@ -1,4 +1,5 @@
 *.o
 *.so
 /fatrace
+/tests/simple-touch
 __pycache__

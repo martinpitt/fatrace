@@ -251,7 +251,11 @@ class FatraceTests(unittest.TestCase):
     def test_command_long_name(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)
         long_cmd = self.tmp_path / "VeryLongTouchCommand"
-        exe(["cp", "/usr/bin/touch", str(long_cmd)])
+        # Use our own simple-touch binary instead of /usr/bin/touch, to work with both
+        # GNU coreutils (standalone binaries) and Rust coreutils (multi-call binary
+        # that determines the utility based on argv[0])
+        simple_touch = TESTDIR / "simple-touch"
+        exe(["cp", str(simple_touch), str(long_cmd)])
 
         f = FatraceRunner(["--current-mount", "--command", "VeryLongTouchCommand", "-s", "2"])
         slow_exe([str(long_cmd), str(self.tmp_path / "hello.txt")])

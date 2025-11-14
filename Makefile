@@ -1,13 +1,13 @@
 CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PREFIX ?= /usr/local
 
-all: fatrace tests/slow-exit.so
+all: fatrace tests/slow-exit.so tests/simple-touch
 
 fatrace: fatrace.o
 	$(CC) $(LDFLAGS) -o $@ $<
 
 clean:
-	rm -f *.o fatrace tests/slow-exit.so
+	rm -f *.o fatrace tests/slow-exit.so tests/simple-touch
 
 distclean: clean
 
@@ -19,6 +19,9 @@ install: fatrace
 
 tests/slow-exit.so: tests/slow-exit.c
 	$(CC) -shared -fPIC -o $@ $< -ldl
+
+tests/simple-touch: tests/simple-touch.c
+	$(CC) $(CFLAGS) -o $@ $<
 
 lint:
 	ruff check power-usage-report
