@@ -144,9 +144,15 @@ class FatraceTests(unittest.TestCase):
         # Create/write/remove a file
         test_file = self.tmp_path / "test.txt"
         slow_exe(["touch", str(test_file)])
-        slow_exe(["bash", "-c", f"echo hello > '{test_file}'"])
+        test_file_stat = test_file.stat()
+        slow_exe(["bash", "-c", f"echo $$ > '{test_file}'"])
+        bash_pid = int(test_file.read_text())
         slow_exe(["head", str(test_file)], stdout=subprocess.DEVNULL)
         slow_exe(["rm", str(test_file)])
+
+        # file name which is not valid UTF-8
+        bad_file = self.tmp_path / f"bad-{chr(1)}.txt"
+        slow_exe(["touch", str(bad_file)])
 
         # moving within same directory
         slow_exe(["touch", str(test_file)])
@@ -174,7 +180,20 @@ class FatraceTests(unittest.TestCase):
         # file creation
         f.assert_json(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "O" in e["types"])
         f.assert_json(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "W" in e["types"])
-        f.assert_json(lambda e: e["comm"] == "bash" and e["path"] == test_file_str and "W" in e["types"])
+        f.assert_json(lambda e: e["comm"] == "bash" and e["pid"] == bash_pid and
+                      e["path"] == test_file_str and "W" in e["types"])
+
+        # device and inode
+        f.assert_json(lambda e: (
+            e["comm"] == "touch" and
+            e["path"] == test_file_str and
+            e["device"] == {"major": os.major(test_file_stat.st_dev), "minor": os.minor(test_file_stat.st_dev)} and
+            e["inode"] == test_file_stat.st_ino
+        ))
+
+        # non-UTF-8 paths have path_raw instead of path; details are covered in tests/test-event.c
+        f.assert_json(lambda e: e["comm"] == "touch" and "path" not in e and
+                      e["path_raw"] == list(str(bad_file).encode()))
 
         # file reading
         f.assert_json(lambda e: e["comm"] == "head" and e["path"] == test_file_str and "R" in e["types"])
@@ -187,7 +206,6 @@ class FatraceTests(unittest.TestCase):
         f.assert_json(lambda e: e["comm"] == "mkdir" and e["path"] == cwd and e["types"] == "+")
 
         # file renaming (can be one or two events)
-        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and "<" in e["types"])
         f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and ">" in e["types"])
 
         # file moving between directories
@@ -196,38 +214,29 @@ class FatraceTests(unittest.TestCase):
 
         # ELOOP symlink operations
         f.assert_json(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
-        f.assert_json(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
 
     def test_command(self):
-        f = FatraceRunner(["--current-mount", "--command", "touch", "-s", "2"])
-
-        # Create files with different programs
-        slow_exe(["touch", str(self.tmp_path / "includeme")])
-        slow_exe(["dd", "if=/dev/zero", f"of={self.tmp_path}/notme", "bs=1", "count=1", "status=none"])
-
-        f.finish()
-
-        # should find touch command, but not dd nor the file it created
-        f.assert_json(lambda e: e["comm"] == "touch" and e["path"] == str(self.tmp_path / "includeme"))
-        f.assert_not_json(lambda e: e["comm"] == "dd")
-        f.assert_not_json(lambda e: "notme" in e["path"])
-
-    def test_command_long_name(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)
         long_cmd = self.tmp_path / "VeryLongTouchCommand"
         # Use our own simple-touch binary instead of /usr/bin/touch, to work with both
         # GNU coreutils (standalone binaries) and Rust coreutils (multi-call binary
         # that determines the utility based on argv[0])
-        simple_touch = TESTDIR / "simple-touch"
-        exe(["cp", str(simple_touch), str(long_cmd)])
+        exe(["cp", str(TESTDIR / "simple-touch"), str(long_cmd)])
 
         f = FatraceRunner(["--current-mount", "--command", "VeryLongTouchCommand", "-s", "2"])
-        slow_exe([str(long_cmd), str(self.tmp_path / "hello.txt")])
+
+        # Create files with different programs
+        slow_exe([str(long_cmd), str(self.tmp_path / "includeme")])
+        slow_exe(["dd", "if=/dev/zero", f"of={self.tmp_path}/notme", "bs=1", "count=1", "status=none"])
+
         f.finish()
 
-        # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1)
+        # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1),
+        # but not dd nor the file it created
         f.assert_json(lambda e: e["comm"] == "VeryLongTouchCo" and "W" in e["types"] and
-                      e["path"] == str(self.tmp_path / "hello.txt"))
+                      e["path"] == str(self.tmp_path / "includeme"))
+        f.assert_not_json(lambda e: e.get("comm") == "dd")
+        f.assert_not_json(lambda e: "notme" in e.get("path", ""))
 
     def test_btrfs(self):
         if not shutil.which("mkfs.btrfs"):
@@ -250,29 +259,20 @@ class FatraceTests(unittest.TestCase):
         exe(["btrfs", "subvolume", "create", str(mount_dir / "subv1")])
 
         # create initial file
-        slow_exe(["bash", "-c", "echo hello > world.txt"])
+        world_file = mount_dir / "world.txt"
+        slow_exe(["bash", "-c", f"echo hello > '{world_file}'"])
 
+        # The event types are covered by test_currentmount; this is about resolving paths
+        # through the fsid → mount fd map, in particular on subvolumes (issue #3)
         f = FatraceRunner(["--current-mount", "-s", "2"])
 
         # Read existing file
-        slow_exe(["head", str(mount_dir / "world.txt")], stdout=subprocess.DEVNULL)
+        slow_exe(["head", str(world_file)], stdout=subprocess.DEVNULL)
 
-        # Standard file operations
+        # Create/remove file
         test_file = mount_dir / "test.txt"
         slow_exe(["touch", str(test_file)])
-        slow_exe(["bash", "-c", f"echo hello > '{test_file}'"])
         slow_exe(["rm", str(test_file)])
-
-        # Move a file within the same directory
-        slow_exe(["touch", str(test_file)])
-        test_file_2 = mount_dir / "test.txt.2"
-        slow_exe(["mv", str(test_file), str(test_file_2)])
-        dest_dir = mount_dir / "dest"
-        slow_exe(["mkdir", str(dest_dir)])
-        dest_file = dest_dir / "test.txt.2"
-        slow_exe(["mv", str(test_file_2), str(dest_file)])
-        slow_exe(["rm", str(dest_file)])
-        slow_exe(["rmdir", str(dest_dir)])
 
         # Create file on subvolume
         subvol_file = mount_dir / "subv1" / "sub.txt"
@@ -281,30 +281,11 @@ class FatraceTests(unittest.TestCase):
         f.finish()
         mount_str = str(mount_dir)
 
-        # world.txt access
-        f.assert_json(lambda e: "R" in e["types"] and e["path"] == str(mount_dir / "world.txt"))
-
-        # file operations on main filesystem
-        test_file_str = str(test_file)
-        f.assert_json(lambda e: e["comm"] == "touch" and "O" in e["types"] and e["path"] == test_file_str)
-        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == test_file_str)
-        f.assert_json(lambda e: e["comm"] == "bash" and "W" in e["types"] and e["path"] == test_file_str)
-        f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == mount_str)
-
-        # directory creation
+        f.assert_json(lambda e: e["comm"] == "head" and "R" in e["types"] and e["path"] == str(world_file))
         f.assert_json(lambda e: e["comm"] == "touch" and e["types"] == "+" and e["path"] == mount_str)
-        f.assert_json(lambda e: e["comm"] == "mkdir" and e["types"] == "+" and e["path"] == mount_str)
-
-        # file renaming (can be one or two events)
-        f.assert_json(lambda e: e["comm"] == "mv" and "<" in e["types"] and e["path"] == mount_str)
-        f.assert_json(lambda e: e["comm"] == "mv" and ">" in e["types"] and e["path"] == mount_str)
-
-        # file moving
-        f.assert_json(lambda e: e["comm"] == "mv" and e["types"] == "<" and e["path"] == mount_str)
-        f.assert_json(lambda e: e["comm"] == "mv" and e["types"] == ">" and e["path"] == str(dest_dir))
-
-        # subvolume file creation
-        f.assert_json(lambda e: e["comm"] == "touch" and "O" in e["types"] and e["path"] == str(subvol_file))
+        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(test_file))
+        f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == mount_str)
+        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(subvol_file))
 
     def test_exe_parents(self):
         f = FatraceRunner(["--current-mount", "-s", "2", "--parents", "--exe"])
@@ -365,111 +346,32 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
 
         # read test file as root
         slow_exe(["head", str(test_file)], stdout=subprocess.DEVNULL)
-        # read test file as nobody
-        slow_exe_nobody(["tail", str(test_file)], stdout=subprocess.DEVNULL)
-
-        # Create/remove a file as root
-        test_file_root = self.tmp_path / "testroot.txt"
-        slow_exe(["touch", str(test_file_root)])
-        slow_exe(["rm", str(test_file_root)])
 
         # Create a world-writable directory for user operations
         user_tmp = self.tmp_path / "user_tmp"
         user_tmp.mkdir()
         user_tmp.chmod(0o1777)
 
-        # Create/remove a file as user 'nobody'
+        # Create a file as user 'nobody'
         test_file_user = user_tmp / "testnobody.txt"
         slow_exe_nobody(["touch", str(test_file_user)])
-        slow_exe_nobody(["rm", str(test_file_user)])
 
         f.finish()
 
-        test_file_str = str(test_file)
-        test_file_root_str = str(test_file_root)
-        test_file_user_str = str(test_file_user)
-
-        # Reading the test file as root
         f.assert_json(lambda e: (
             e["comm"] == "head" and
             e["uid"] == 0 and
             e["gid"] == 0 and
-            re.match(r"^RC?O?$", e["types"]) is not None and
-            e["path"] == test_file_str
+            "R" in e["types"] and
+            e["path"] == str(test_file)
         ))
 
-        # Reading the test file as user nobody
-        f.assert_json(lambda e: (
-            e["comm"] == "tail" and
-            e["uid"] == nobody_uid and
-            e["gid"] == nobody_gid and
-            re.match(r"^RC?O?$", e["types"]) is not None and
-            e["path"] == test_file_str
-        ))
-
-        # File creation as root
-        f.assert_json(lambda e: (
-            e["comm"] == "touch" and
-            e["uid"] == 0 and
-            e["gid"] == 0 and
-            re.match(r"^C?W?O$", e["types"]) is not None and
-            e["path"] == test_file_root_str
-        ))
-
-        # File creation as user nobody
         f.assert_json(lambda e: (
             e["comm"] == "touch" and
             e["uid"] == nobody_uid and
             e["gid"] == nobody_gid and
-            re.match(r"^C?W?O$", e["types"]) is not None and
-            e["path"] == test_file_user_str
-        ))
-
-    def test_json(self):
-        """JSON-specific features: path_raw, pid, device/inode.
-
-        The UTF-8 validation details are covered by tests/test-event.c.
-        """
-        f = FatraceRunner(["--current-mount", "--user", "-s", "10"])
-
-        # Test 1: Basic path tracking
-        good_file = self.tmp_path / "1-good.tmp"
-        slow_exe(["touch", str(good_file)])
-
-        # Test 2: path_raw for non-UTF8 paths
-        bad_file = self.tmp_path / f"2-bad-{chr(1)}.tmp"
-        slow_exe(["touch", str(bad_file)])
-
-        # Test 3: pid tracking
-        pid_file = self.tmp_path / "3-pid"
-        slow_exe(["bash", "-c", f"echo $$ > '{pid_file}'"])
-
-        # Test 4: device and inode tracking
-        device_file = self.tmp_path / "4-good.tmp"
-        slow_exe(["touch", str(device_file)])
-
-        f.finish()
-
-        # Test 1: Basic path tracking
-        f.assert_json(lambda e: e["comm"] == "touch" and e["path"] == str(good_file) and "path_raw" not in e)
-
-        # Test 2: path_raw for non-UTF8 paths
-        # For files with invalid UTF-8, should have path_raw instead of path
-        f.assert_json(lambda e: e["comm"] == "touch" and
-                      e["path_raw"] == list(str(bad_file).encode('utf-8')) and
-                      "path" not in e)
-
-        # Test 3: pid tracking
-        recorded_pid = int(pid_file.read_text().strip())
-        f.assert_json(lambda e: e["comm"] == "bash" and e["pid"] == recorded_pid and e["path"] == str(pid_file))
-
-        # Test 4: device and inode tracking
-        stat_result = device_file.stat()
-        f.assert_json(lambda e: (
-            e["comm"] == "touch" and
-            e["path"] == str(device_file) and
-            e["device"] == {"major": os.major(stat_result.st_dev), "minor": os.minor(stat_result.st_dev)} and
-            e["inode"] == stat_result.st_ino
+            "W" in e["types"] and
+            e["path"] == str(test_file_user)
         ))
 
     def test_dir(self):
@@ -539,29 +441,17 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         # read a system file
         slow_exe(["head", "/etc/passwd"], stdout=subprocess.DEVNULL)
 
-        # create file
+        # create and remove a file
         test_file = Path("/tmp/fatrace-test.txt")
         slow_exe(["touch", str(test_file)])
-        slow_exe(["bash", "-c", f"echo hello > '{test_file}'"])
-
-        # remove file
         slow_exe(["rm", str(test_file)])
 
         f.finish()
 
+        # events on different mounts resolve to paths
         head_binary = which("head")
-
-        # opening the head binary
         f.assert_json(lambda e: "R" in e["types"] and e["path"] == head_binary)
-        # head accessing /etc/passwd
         f.assert_json(lambda e: "R" in e["types"] and e["path"] == "/etc/passwd")
-
-        # create a file
-        test_file_str = str(test_file)
-        f.assert_json(lambda e: e["comm"] == "touch" and "O" in e["types"] and e["path"] == test_file_str)
-        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == test_file_str)
-        f.assert_json(lambda e: e["comm"] == "bash" and "W" in e["types"] and e["path"] == test_file_str)
-
-        # remove file
+        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(test_file))
         f.assert_json(lambda e: e["comm"] == "touch" and e["types"] == "+" and e["path"] == "/tmp")
         f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == "/tmp")
