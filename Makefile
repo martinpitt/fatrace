@@ -32,8 +32,8 @@ check: tests/test-event
 	tests/test-event
 
 lint:
-	ruff check power-usage-report
-	ruff check tests
+	ruff check --extend-select E501 --line-length 118 power-usage-report
+	ruff check --extend-select E501 --line-length 118 tests
 	mypy power-usage-report
 	mypy tests
 
