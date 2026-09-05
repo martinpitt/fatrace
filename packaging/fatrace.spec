@@ -28,6 +28,9 @@ make install DESTDIR=%{buildroot}
 # move /sbin to /bin
 mv %{buildroot}%{_prefix}/sbin %{buildroot}%{_bindir}
 
+%check
+make check
+
 %files
 %doc COPYING
 %{_bindir}/fatrace

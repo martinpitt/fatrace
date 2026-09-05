@@ -11,4 +11,5 @@ test: |
   cd ..
   # build so that we get the slow-exit.so preload lib
   make
+  make check
   env FATRACE_INSTALLED_TEST=1 python3 -m unittest -v

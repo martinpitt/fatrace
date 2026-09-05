@@ -4,6 +4,12 @@
 
 ## Testing
 
+The unit tests for the event formatting do not need any privileges:
+
+```sh
+make check
+```
+
 Like `fatrace` itself, the integration tests have to run as root:
 
 ```sh

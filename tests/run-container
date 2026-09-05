@@ -17,6 +17,7 @@ else
 fi
 
 make
+make check
 
 python3 -m unittest -v || {
     if [ -n "${DEBUG:-}" ]; then

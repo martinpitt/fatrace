@@ -20,6 +20,9 @@ jobs:
       - name: Build
         run: make
 
+      - name: Run unit tests
+        run: make check
+
       - name: Run tests
         run: sudo python3 -m unittest -v
 

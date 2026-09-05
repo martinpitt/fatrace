@@ -1,13 +1,15 @@
 CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PREFIX ?= /usr/local
 
-all: fatrace tests/slow-exit.so tests/simple-touch
+all: fatrace tests/slow-exit.so tests/simple-touch tests/test-event
 
-fatrace: fatrace.o
-	$(CC) $(LDFLAGS) -o $@ $<
+fatrace: fatrace.o event.o
+	$(CC) $(LDFLAGS) -o $@ $^
+
+fatrace.o event.o tests/test-event.o: event.h
 
 clean:
-	rm -f *.o fatrace tests/slow-exit.so tests/simple-touch
+	rm -f *.o tests/*.o fatrace tests/slow-exit.so tests/simple-touch tests/test-event
 
 distclean: clean
 
@@ -23,6 +25,12 @@ tests/slow-exit.so: tests/slow-exit.c
 tests/simple-touch: tests/simple-touch.c
 	$(CC) $(CFLAGS) -o $@ $<
 
+tests/test-event: tests/test-event.o event.o
+	$(CC) $(LDFLAGS) -o $@ $^
+
+check: tests/test-event
+	tests/test-event
+
 lint:
 	ruff check power-usage-report
 	ruff check tests
@@ -30,4 +38,4 @@ lint:
 	mypy tests
 
 
-.PHONY: all clean distclean install lint
+.PHONY: all check clean distclean install lint
