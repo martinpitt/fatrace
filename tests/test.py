@@ -339,10 +339,13 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         # Test user tracking functionality
         f = FatraceRunner(["--current-mount", "--user", "-s", "4"])
 
+        # nobody may not be able to read our source tree, e.g. in a 0700 home directory; our
+        # tmpfs root is world-readable (it produces a few extra events for the library itself)
+        preload = self.tmp_path / "slow-exit.so"
+        shutil.copy(TESTDIR / "slow-exit.so", preload)
+
         def slow_exe_nobody(argv: list[str], **kwargs) -> None:
-            exe(["runuser", "-u", "nobody",
-                 "env", "LD_PRELOAD=" + str(TESTDIR / "slow-exit.so")] + argv,
-                **kwargs)
+            exe(["runuser", "-u", "nobody", "env", f"LD_PRELOAD={preload}"] + argv, **kwargs)
 
         # read test file as root
         slow_exe(["head", str(test_file)], stdout=subprocess.DEVNULL)
