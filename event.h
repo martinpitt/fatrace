@@ -22,15 +22,55 @@
 #ifndef FATRACE_EVENT_H
 #define FATRACE_EVENT_H
 
+#include <limits.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+
+#include <sys/time.h>
+#include <sys/types.h>
 
 /* https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html ; not defined in any include file */
 #ifndef TASK_COMM_LEN
 #define TASK_COMM_LEN 16
 #endif
 
+/* deeper process trees get truncated with a warning */
+#define MAX_PARENTS 64
+
+enum fatrace_timestamp {
+    TIMESTAMP_NONE,
+    TIMESTAMP_LOCAL,    /* HH:MM:SS.uuuuuu wall clock time */
+    TIMESTAMP_EPOCH,    /* seconds.uuuuuu since the epoch */
+};
+
+struct fatrace_event_proc {
+    pid_t pid;
+    char comm[TASK_COMM_LEN];   /* "" if unknown */
+    char exe[PATH_MAX];         /* "" if unknown or not requested */
+};
+
+struct fatrace_event {
+    struct timeval time;
+    uint64_t mask;
+    struct fatrace_event_proc proc;
+    bool have_ids;
+    uid_t uid;
+    gid_t gid;
+    bool fd_valid;              /* false if the file vanished before it could be looked at;
+                                   then path is "" and have_stat is false */
+    char path[PATH_MAX];        /* "" if unknown */
+    bool have_stat;
+    dev_t dev;
+    ino_t ino;
+    unsigned parents_len;
+    struct fatrace_event_proc parents[MAX_PARENTS];
+};
+
 const char* mask2str (uint64_t mask);
 void print_json_str (FILE *out, const char* key, const char* value);
+
+void format_fatrace_event_text (FILE *out, const struct fatrace_event *ev, enum fatrace_timestamp timestamp_mode);
+void format_fatrace_event_json (FILE *out, const struct fatrace_event *ev, enum fatrace_timestamp timestamp_mode);
 
 #endif /* FATRACE_EVENT_H */

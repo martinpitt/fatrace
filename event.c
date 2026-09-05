@@ -18,9 +18,12 @@
 
 #define _GNU_SOURCE
 
+#include <assert.h>
 #include <string.h>
+#include <time.h>
 
 #include <sys/fanotify.h>
+#include <sys/sysmacros.h>
 
 #include "event.h"
 
@@ -130,4 +133,108 @@ print_json_str (FILE *out, const char* key, const char* value) {
             fprintf (out, i ? ",%d" : "%d", (unsigned int)(unsigned char)(value[i]));
         putc (']', out);
     }
+}
+
+/* print time value in the given mode */
+static void
+format_time (FILE *out, const struct timeval *tv, enum fatrace_timestamp mode)
+{
+    assert (mode != TIMESTAMP_NONE);
+    if (mode == TIMESTAMP_LOCAL) {
+        char hms[9];
+        strftime (hms, sizeof hms, "%H:%M:%S", localtime (&tv->tv_sec));
+        fputs (hms, out);
+    } else if (mode == TIMESTAMP_EPOCH) {
+        /* time_t may be wider than long on 32 bit with _TIME_BITS=64 */
+        fprintf (out, "%lli", (long long) tv->tv_sec);
+    }
+    fprintf (out, ".%06li", (long) tv->tv_usec);
+}
+
+void
+format_fatrace_event_text (FILE *out, const struct fatrace_event *ev, enum fatrace_timestamp timestamp_mode)
+{
+    if (timestamp_mode != TIMESTAMP_NONE) {
+        format_time (out, &ev->time, timestamp_mode);
+        putc (' ', out);
+    }
+
+    fprintf (out, "%s(%i)", ev->proc.comm[0] ? ev->proc.comm : "unknown", ev->proc.pid);
+    if (ev->have_ids)
+        fprintf (out, " [%u:%u]", ev->uid, ev->gid);
+    fprintf (out, ": %-3s ", mask2str (ev->mask));
+
+    if (!ev->fd_valid)
+        fputs ("(deleted)", out);
+    else if (ev->path[0])
+        fputs (ev->path, out);
+    else if (ev->have_stat)
+        fprintf (out, "device %u:%u inode %llu", major (ev->dev), minor (ev->dev), (unsigned long long) ev->ino);
+
+    if (ev->proc.exe[0])
+        fprintf (out, " exe=%s", ev->proc.exe);
+
+    for (unsigned i = 0; i < ev->parents_len; ++i) {
+        const struct fatrace_event_proc *p = &ev->parents[i];
+        fprintf (out, "%s(pid=%i", i == 0 ? ", parents=" : ",", p->pid);
+        if (p->comm[0])
+            fprintf (out, " comm=%s", p->comm);
+        if (p->exe[0])
+            fprintf (out, " exe=%s", p->exe);
+        putc (')', out);
+    }
+
+    putc ('\n', out);
+}
+
+void
+format_fatrace_event_json (FILE *out, const struct fatrace_event *ev, enum fatrace_timestamp timestamp_mode)
+{
+    putc ('{', out);
+    if (timestamp_mode != TIMESTAMP_NONE) {
+        /* wall clock time is a string, epoch time a number */
+        const char *quote = timestamp_mode == TIMESTAMP_LOCAL ? "\"" : "";
+        fprintf (out, "\"timestamp\":%s", quote);
+        format_time (out, &ev->time, timestamp_mode);
+        fprintf (out, "%s,", quote);
+    }
+
+    if (ev->proc.comm[0]) {
+        print_json_str (out, "comm", ev->proc.comm);
+        putc (',', out);
+    }
+    fprintf (out, "\"pid\":%i,", ev->proc.pid);
+    if (ev->have_ids)
+        fprintf (out, "\"uid\":%u,\"gid\":%u,", ev->uid, ev->gid);
+    fprintf (out, "\"types\":\"%s\"", mask2str (ev->mask));
+
+    if (ev->have_stat)
+        fprintf (out, ",\"device\":{\"major\":%u,\"minor\":%u},\"inode\":%llu",
+                 major (ev->dev), minor (ev->dev), (unsigned long long) ev->ino);
+    if (ev->path[0]) {
+        putc (',', out);
+        print_json_str (out, "path", ev->path);
+    }
+    if (ev->proc.exe[0]) {
+        putc (',', out);
+        print_json_str (out, "exe", ev->proc.exe);
+    }
+
+    for (unsigned i = 0; i < ev->parents_len; ++i) {
+        const struct fatrace_event_proc *p = &ev->parents[i];
+        fprintf (out, "%s{\"pid\":%i", i == 0 ? ",\"parents\":[" : ",", p->pid);
+        if (p->comm[0]) {
+            putc (',', out);
+            print_json_str (out, "comm", p->comm);
+        }
+        if (p->exe[0]) {
+            putc (',', out);
+            print_json_str (out, "exe", p->exe);
+        }
+        putc ('}', out);
+    }
+    if (ev->parents_len > 0)
+        putc (']', out);
+
+    fputs ("}\n", out);
 }

@@ -31,11 +31,11 @@
 #include <mntent.h>
 #include <signal.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <unistd.h>
 
 #include <sys/fanotify.h>
@@ -43,7 +43,6 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
-#include <sys/sysmacros.h>
 #include <sys/time.h>
 #include <sys/types.h>
 
@@ -66,7 +65,7 @@ static char* option_output = NULL;
 static long option_filter_mask = 0xffffffff;
 static long option_timeout = -1;
 static bool option_current_mount = false;
-static int option_timestamp = 0;
+static enum fatrace_timestamp option_timestamp = TIMESTAMP_NONE;
 static bool option_user = false;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
@@ -246,65 +245,78 @@ get_ppid (int proc_fd, pid_t pid) {
     return 0;
 }
 
-/**
- * print_event:
- *
- * Print data from fanotify_event_metadata struct to stdout.
- */
+/* read /proc/PID/exe; "" on failure */
 static void
-print_event (const struct fanotify_event_metadata *data,
-             const struct timeval *event_time)
+get_exe (int proc_fd, pid_t pid, char *exe, size_t exe_size) {
+    ssize_t len = readlinkat (proc_fd, "exe", exe, exe_size - 1);
+    if (len < 0) {
+        warn ("failed to readlink /proc/%i/exe", pid);
+        len = 0;
+    }
+    exe[len] = '\0';
+}
+
+/**
+ * process_event:
+ *
+ * Apply the filter options to a fanotify event and collect all information into @ev
+ *
+ * Returns: true if the event passed the filters and @ev is valid, false if the
+ * event is ignored.
+ */
+static bool
+process_event (const struct fanotify_event_metadata *data,
+               const struct timeval *event_time,
+               struct fatrace_event *ev)
 {
     int event_fd = data->fd;
-    static char printbuf[100];
+    static char procpath[100];
     static char procname[TASK_COMM_LEN];
     static int procname_pid = -1;
-    static char pathname[PATH_MAX];
     bool got_procname = false;
-    static char exepath[PATH_MAX];
-    bool got_exepath = false;
-    struct stat proc_fd_stat = { .st_uid = -1 };
-    int ppid = 0;
+    pid_t ppid = 0;
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
             close (event_fd);
-        return;
+        return false;
     }
 
-    snprintf (printbuf, sizeof (printbuf), "/proc/%i", data->pid);
-    int proc_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
+    /* parents[] is the bulk of the struct and only valid up to parents_len */
+    memset (ev, 0, offsetof (struct fatrace_event, parents));
+    ev->time = *event_time;
+    ev->mask = data->mask;
+    ev->proc.pid = data->pid;
+
+    snprintf (procpath, sizeof (procpath), "/proc/%i", data->pid);
+    int proc_fd = open (procpath, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
-        /* get ppid */
         if (option_parents)
             ppid = get_ppid (proc_fd, data->pid);
 
-        /* read process name */
         if (get_procname (proc_fd, data->pid, procname, sizeof (procname))) {
             procname_pid = data->pid;
             got_procname = true;
         }
 
-        /* get user and group */
+        /* /proc/PID is owned by the process' user and group */
         if (option_user) {
-            if (fstat (proc_fd, &proc_fd_stat) < 0)
+            struct stat st;
+            if (fstat (proc_fd, &st) < 0) {
                 warn ("failed to stat /proc/%i", data->pid);
-        }
-
-        /* get exe */
-        if (option_exe) {
-            ssize_t len = readlinkat (proc_fd, "exe", exepath, sizeof (exepath));
-            if (len >= 0) {
-                exepath[len] = '\0';
-                got_exepath = true;
             } else {
-                warn ("failed to readlink /proc/%i/exe", data->pid);
+                ev->have_ids = true;
+                ev->uid = st.st_uid;
+                ev->gid = st.st_gid;
             }
         }
 
+        if (option_exe)
+            get_exe (proc_fd, data->pid, ev->proc.exe, sizeof (ev->proc.exe));
+
         close (proc_fd);
     } else {
-        warn ("failed to open /proc/%u", data->pid);
+        warn ("failed to open /proc/%i", data->pid);
     }
 
     /* /proc/pid/comm often goes away before processing the event; reuse previously cached value if pid still matches */
@@ -317,12 +329,13 @@ print_event (const struct fanotify_event_metadata *data,
             procname[0] = '\0';
         }
     }
+    memcpy (ev->proc.comm, procname, sizeof (procname));
 
     if (option_comm && strcmp (option_comm, procname) != 0 &&
         procname[0] != '\0') {
         if (event_fd >= 0)
             close (event_fd);
-        return;
+        return false;
     }
 
 #ifdef FAN_REPORT_FID
@@ -330,122 +343,55 @@ print_event (const struct fanotify_event_metadata *data,
         event_fd = get_fid_event_fd (data);
 #endif
 
-    bool got_path = false;
-    struct stat st = { .st_uid = -1 };
     if (event_fd >= 0) {
-        if (option_json && fstat (event_fd, &st) < 0)
+        struct stat st;
+
+        ev->fd_valid = true;
+        if (fstat (event_fd, &st) < 0) {
             warn ("stat");
-        /* try to figure out the path name */
-        snprintf (printbuf, sizeof (printbuf), "/proc/self/fd/%i", event_fd);
-        ssize_t len = readlink (printbuf, pathname, sizeof (pathname));
-        if (len >= 0) {
-            pathname[len] = '\0';
-            got_path = true;
-        } else if (option_json) {
-          // no fallback, device/inode will always be printed
         } else {
-            /* fall back to the device/inode */
-            if (fstat (event_fd, &st) < 0) {
-                warn ("stat");
-                pathname[0] = '\0';
-            } else {
-                snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld", major (st.st_dev), minor (st.st_dev), st.st_ino);
-            }
+            ev->have_stat = true;
+            ev->dev = st.st_dev;
+            ev->ino = st.st_ino;
         }
+
+        snprintf (procpath, sizeof (procpath), "/proc/self/fd/%i", event_fd);
+        ssize_t len = readlink (procpath, ev->path, sizeof (ev->path) - 1);
+        if (len >= 0)
+            ev->path[len] = '\0';
 
         close (event_fd);
-    } else {
-        snprintf (pathname, sizeof (pathname), "(deleted)");
     }
 
-    if (option_json)
-        putchar('{');
-
-    /* print event */
-    if (option_timestamp == 1) {
-        strftime (printbuf, sizeof (printbuf), "%H:%M:%S", localtime (&event_time->tv_sec));
-        printf (option_json ? "\"timestamp\":\"%s.%06li\"," : "%s.%06li ", printbuf, event_time->tv_usec);
-    } else if (option_timestamp == 2) {
-        printf (option_json ? "\"timestamp\":%li.%06li," : "%li.%06li ", event_time->tv_sec, event_time->tv_usec);
-    }
-
-    /* print user and group */
-    if (option_user && proc_fd_stat.st_uid != (uid_t)-1)
-        snprintf(printbuf, sizeof printbuf,
-                 option_json ? "\"uid\":%u,\"gid\":%u," : " [%u:%u]",
-                 proc_fd_stat.st_uid, proc_fd_stat.st_gid);
-    else
-        printbuf[0] = '\0';
-
-    if (option_json) {
-        if (procname_pid >= 0) {
-            print_json_str(stdout, "comm", procname);
-            putchar(',');
+    while (ppid > 0) {
+        if (ev->parents_len == MAX_PARENTS) {
+            warnx ("process %i has more than %i parents, truncating", data->pid, MAX_PARENTS);
+            break;
         }
-        printf ("\"pid\":%i,%s\"types\":\"%s\"",
-                data->pid, printbuf, mask2str (data->mask));
-        if (st.st_uid != (uid_t)-1)
-            printf(",\"device\":{\"major\":%i,\"minor\":%i},\"inode\":%ld"
-                   , major (st.st_dev), minor (st.st_dev), st.st_ino);
-        if (got_path) {
-            putchar(',');
-            print_json_str(stdout, "path", pathname);
-        }
-        if (option_exe && got_exepath) {
-            putchar(',');
-            print_json_str(stdout, "exe", exepath);
-        }
-    } else {
-        printf ("%s(%i)%s: %-3s %s", procname[0] == '\0' ? "unknown" : procname, data->pid, printbuf, mask2str (data->mask), pathname);
-        if (option_exe && got_exepath)
-            printf (" exe=%s", exepath);
-    }
-    if (option_parents && ppid) {
-        printf(option_json ? ",\"parents\":" : ", parents");
-        char sep = option_json ? '[' : '=';
-        do {
-            printf(option_json ? "%c{\"pid\":%i" : "%c(pid=%i", sep, ppid);
-            sep = ',';
-            snprintf (printbuf, sizeof (printbuf), "/proc/%i", ppid);
-            int ppid_dir_fd = open (printbuf, O_RDONLY | O_DIRECTORY);
-            if (ppid_dir_fd >= 0) {
-                char p_procname[TASK_COMM_LEN];
-                if (get_procname (ppid_dir_fd, ppid, p_procname, sizeof (p_procname))) {
-                    if (option_json) {
-                        putchar(',');
-                        print_json_str(stdout, "comm", p_procname);
-                    } else
-                      printf(" comm=%s", p_procname);
-                }
-                if (option_exe) {
-                    ssize_t len = readlinkat (ppid_dir_fd, "exe", exepath, sizeof (exepath) - 1);
-                    if (len >= 0) {
-                        exepath[len] = '\0';
-                        if (option_json) {
-                            putchar(',');
-                            print_json_str(stdout, "exe", exepath);
-                        } else
-                          printf(" exe=%s", exepath);
-                    } else {
-                        warn("failed to readlink /proc/%i/exe", ppid);
-                    }
-                }
-                /* get next parent */
-                if (ppid == 1)
-                    ppid = 0;
-                else
-                    ppid = get_ppid (ppid_dir_fd, ppid);
-                close (ppid_dir_fd);
-            } else {
-                warn ("failed to open %s", printbuf);
+        struct fatrace_event_proc *parent = &ev->parents[ev->parents_len++];
+        parent->pid = ppid;
+        parent->comm[0] = '\0';
+        parent->exe[0] = '\0';
+
+        snprintf (procpath, sizeof (procpath), "/proc/%i", ppid);
+        int ppid_dir_fd = open (procpath, O_RDONLY | O_DIRECTORY);
+        if (ppid_dir_fd >= 0) {
+            get_procname (ppid_dir_fd, ppid, parent->comm, sizeof (parent->comm));
+            if (option_exe)
+                get_exe (ppid_dir_fd, ppid, parent->exe, sizeof (parent->exe));
+            /* get next parent */
+            if (ppid == 1)
                 ppid = 0;
-            }
-            putchar(option_json ? '}' : ')');
-        } while (ppid > 0);
-        if (option_json)
-            putchar(']');
+            else
+                ppid = get_ppid (ppid_dir_fd, ppid);
+            close (ppid_dir_fd);
+        } else {
+            warn ("failed to open %s", procpath);
+            ppid = 0;
+        }
     }
-    printf(option_json ? "}\n" : "\n");
+
+    return true;
 }
 
 static void
@@ -708,7 +654,7 @@ parse_args (int argc, char** argv)
                 break;
 
             case 't':
-                if (++option_timestamp > 2)
+                if (++option_timestamp > TIMESTAMP_EPOCH)
                     errx (EXIT_FAILURE, "Error: --timestamp option can be given at most two times");
                 break;
 
@@ -777,11 +723,14 @@ main (int argc, char** argv)
     struct fanotify_event_metadata *data;
     struct sigaction sa;
     struct timeval event_time;
+    static struct fatrace_event event;
+    void (*format_event) (FILE *, const struct fatrace_event *, enum fatrace_timestamp);
 
     /* always ignore events from ourselves (writing log file) */
     ignored_pids[ignored_pids_len++] = getpid ();
 
     parse_args (argc, argv);
+    format_event = option_json ? format_fatrace_event_json : format_fatrace_event_text;
 
 #ifdef FAN_REPORT_FID
     fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID, O_LARGEFILE);
@@ -868,7 +817,8 @@ main (int argc, char** argv)
         while (FAN_EVENT_OK (data, res)) {
             if (data->vers != FANOTIFY_METADATA_VERSION)
                 errx (EXIT_FAILURE, "Mismatch of fanotify metadata version");
-            print_event (data, &event_time);
+            if (process_event (data, &event_time, &event))
+                format_event (stdout, &event, option_timestamp);
             data = FAN_EVENT_NEXT (data, res);
         }
     }
