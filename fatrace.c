@@ -2,7 +2,8 @@
  * fatrace - Trace system wide file access events.
  *
  * (C) 2012 Canonical Ltd.
- * Author: Martin Pitt <martin.pitt@ubuntu.com>
+ * (C) 2026 Martin Pitt
+ * Author: Martin Pitt <martin@piware.de>
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
