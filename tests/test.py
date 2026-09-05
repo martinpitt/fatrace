@@ -39,7 +39,7 @@ def which(cmd: str) -> str:
 def retry_unmount(path: str) -> None:
     for _ in range(5):
         try:
-            subprocess.call(["umount", path])
+            subprocess.check_call(["umount", path])
             break
         except subprocess.CalledProcessError as e:
             print(f"Retrying umount {path}: {e}")
