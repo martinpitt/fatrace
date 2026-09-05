@@ -459,7 +459,7 @@ print_event (const struct fanotify_event_metadata *data,
                 warn ("stat");
                 pathname[0] = '\0';
             } else {
-                snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld\n", major (st.st_dev), minor (st.st_dev), st.st_ino);
+                snprintf (pathname, sizeof (pathname), "device %i:%i inode %ld", major (st.st_dev), minor (st.st_dev), st.st_ino);
             }
         }
 
