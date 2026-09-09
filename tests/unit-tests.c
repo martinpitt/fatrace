@@ -118,7 +118,10 @@ test_print_json_str (void)
     ASSERT_JSON ("k", "\x7f-", "\"k_raw\":[127,45]");
 
     /* 2-byte UTF-8 */
-    ASSERT_JSON ("k", "\xc2\x80-", "\"k\":\"-\"");           /* U+0080 */
+    ASSERT_JSON ("k", "\xc2\x80-", "\"k_raw\":[194,128,45]"); /* U+0080 */
+    ASSERT_JSON ("k", "\xc2\x9f-", "\"k_raw\":[194,159,45]"); /* U+009f */
+    ASSERT_JSON ("k", "\xc2\xa0-", "\"k\":\" -\"");           /* U+00a0 */
+    ASSERT_JSON ("k", "\xc2\xa1-", "\"k\":\"¡-\"");           /* U+00A1 */
     ASSERT_JSON ("k", "\xc3\x85-", "\"k\":\"Å-\"");           /* U+00C5 */
     ASSERT_JSON ("k", "\xc3-",     "\"k_raw\":[195,45]");     /* incomplete */
     ASSERT_JSON ("k", "\xc3",      "\"k_raw\":[195]");        /* incomplete at end of string */

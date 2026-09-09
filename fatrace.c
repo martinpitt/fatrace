@@ -282,7 +282,13 @@ nonfunny_utf8_len (const char* str) {
     while (str[i] != 0) {
         unsigned char c = s[i];
         // Unescaped ASCII
-        if (0x20 <= c && c != '"' && c != '\\' && c <= 0x7e) {
+        if (// Not C0 control character
+            // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
+            0x20 <= c &&
+            // Not double quote or backslash, which require JSON escaping
+            c != '"' && c != '\\' &&
+            // Not unprintable DEL (0x7f) or non-ASCII
+            c <= 0x7e) {
             i++; continue;
         }
         // it's ok to read s[i+1] since we know s[i] != 0
@@ -290,7 +296,10 @@ nonfunny_utf8_len (const char* str) {
         if (// 2-char: 110xxxxx 10xxxxxx
             (mbc & 0xe0c0) == 0xc080 &&
             // but not 1100000x 10xxxxxx (overlong)
-            (mbc & 0xfec0) != 0xc080) {
+            (mbc & 0xfec0) != 0xc080 &&
+            // neither 11000010 100xxxxx (C1 control characters)
+            // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
+            (mbc & 0xffe0) != 0xc280) {
             i+=2; continue;
         }
         if (s[i+1] == 0)

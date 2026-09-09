@@ -104,8 +104,8 @@ long process names.
 
 .TP
 .B comm_raw
-The raw bytes of the process name, in case it is invalid UTF-8 or would require
-escaping.
+The raw bytes of the process name, in case it is invalid UTF-8, would require
+escaping, or contains a control character.
 
 .TP
 .B pid
@@ -143,8 +143,8 @@ The path to the affected file.
 
 .TP
 .B path_raw
-The raw bytes of the path to the affected file, in case it is invalid UTF-8 or
-would require escaping.
+The raw bytes of the path to the affected file, in case it is invalid UTF-8,
+would require escaping, or contains a control character.
 
 .TP
 .B exe
@@ -152,8 +152,8 @@ The path to the executable, if you specify the \fB\-\-exe\fR option.
 
 .TP
 .B exe_raw
-The raw bytes of the executable path, in case it is not valid UTF-8 or would
-require escaping.
+The raw bytes of the executable path, in case it is not valid UTF-8, would
+require escaping, or contains a control character.
 
 .TP
 .B parents
