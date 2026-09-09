@@ -27,6 +27,9 @@ static unsigned failures;
     } \
 } while (0)
 
+#define ASSERT_JSON(key, value, expected) \
+    ASSERT_STREQ (json_str (key, value), expected)
+
 /* capture formatter output: write to `mem` between mem_start() and mem_end(); the result is
  * valid until the next mem_start() */
 static FILE *mem;
@@ -88,79 +91,61 @@ json_str (const char *key, const char *value)
     return mem_end ();
 }
 
-/* check that value gets printed verbatim (good) or as a "_raw" byte array (bad) */
-static void
-check_json_str_utf8 (const char *value, bool good)
-{
-    char expected[256];
-    size_t len = 0;
-
-    if (good) {
-        snprintf (expected, sizeof expected, "\"k\":\"%s\"", value);
-    } else {
-        len = snprintf (expected, sizeof expected, "\"k_raw\":[");
-        for (const unsigned char *c = (const unsigned char *) value; *c; ++c)
-            len += snprintf (expected + len, sizeof expected - len, "%s%u",
-                             c == (const unsigned char *) value ? "" : ",", *c);
-        snprintf (expected + len, sizeof expected - len, "]");
-    }
-    ASSERT_STREQ (json_str ("k", value), expected);
-}
-
 static void
 test_print_json_str (void)
 {
-    ASSERT_STREQ (json_str ("path", "/tmp/hello.txt"), "\"path\":\"/tmp/hello.txt\"");
-    ASSERT_STREQ (json_str ("comm", ""), "\"comm\":\"\"");
+    ASSERT_JSON ("path", "/tmp/hello.txt", "\"path\":\"/tmp/hello.txt\"");
+    ASSERT_JSON ("comm", "",               "\"comm\":\"\"");
+
     /* JSON metacharacters are not escaped but trigger the raw representation */
-    ASSERT_STREQ (json_str ("path", "a\"b"), "\"path_raw\":[97,34,98]");
-    ASSERT_STREQ (json_str ("path", "a\\b"), "\"path_raw\":[97,92,98]");
-    ASSERT_STREQ (json_str ("path", "\n"), "\"path_raw\":[10]");
+    ASSERT_JSON ("path", "a\"b", "\"path_raw\":[97,34,98]");
+    ASSERT_JSON ("path", "a\\b", "\"path_raw\":[97,92,98]");
+    ASSERT_JSON ("path", "\n",   "\"path_raw\":[10]");
 
     /* ASCII boundaries */
-    check_json_str_utf8 ("\x05-tmp", false);
-    check_json_str_utf8 ("\x1f-tmp", false);
-    check_json_str_utf8 ("\x20-tmp", true);
-    check_json_str_utf8 ("\x21-tmp", true);
-    check_json_str_utf8 ("\x22-tmp", false); /* " */
-    check_json_str_utf8 ("\x23-tmp", true);
-    check_json_str_utf8 ("\x5b-tmp", true);
-    check_json_str_utf8 ("\x5c-tmp", false); /* \ */
-    check_json_str_utf8 ("\x5d-tmp", true);
-    check_json_str_utf8 ("\x7e-tmp", true);
-    check_json_str_utf8 ("\x7f-tmp", false);
+    ASSERT_JSON ("k", "\x05-", "\"k_raw\":[5,45]");
+    ASSERT_JSON ("k", "\x1f-", "\"k_raw\":[31,45]");
+    ASSERT_JSON ("k", "\x20-", "\"k\":\" -\"");
+    ASSERT_JSON ("k", "\x21-", "\"k\":\"!-\"");
+    ASSERT_JSON ("k", "\x22-", "\"k_raw\":[34,45]"); /* " */
+    ASSERT_JSON ("k", "\x23-", "\"k\":\"#-\"");
+    ASSERT_JSON ("k", "\x5b-", "\"k\":\"[-\"");
+    ASSERT_JSON ("k", "\x5c-", "\"k_raw\":[92,45]"); /* \ */
+    ASSERT_JSON ("k", "\x5d-", "\"k\":\"]-\"");
+    ASSERT_JSON ("k", "\x7e-", "\"k\":\"~-\"");
+    ASSERT_JSON ("k", "\x7f-", "\"k_raw\":[127,45]");
 
     /* 2-byte UTF-8 */
-    check_json_str_utf8 ("\xc2\x80-tmp", true);     /* U+0080 */
-    check_json_str_utf8 ("\xc3\x85-tmp", true);     /* U+00C5 Å */
-    check_json_str_utf8 ("\xc3-tmp", false);        /* incomplete */
-    check_json_str_utf8 ("\xc3", false);            /* incomplete at end of string */
-    check_json_str_utf8 ("\xc0\x80-tmp", false);    /* overlong */
-    check_json_str_utf8 ("\xdf\xbf-tmp", true);     /* U+07FF */
+    ASSERT_JSON ("k", "\xc2\x80-", "\"k\":\"-\"");           /* U+0080 */
+    ASSERT_JSON ("k", "\xc3\x85-", "\"k\":\"Å-\"");           /* U+00C5 */
+    ASSERT_JSON ("k", "\xc3-",     "\"k_raw\":[195,45]");     /* incomplete */
+    ASSERT_JSON ("k", "\xc3",      "\"k_raw\":[195]");        /* incomplete at end of string */
+    ASSERT_JSON ("k", "\xc0\x80-", "\"k_raw\":[192,128,45]"); /* overlong */
+    ASSERT_JSON ("k", "\xdf\xbf-", "\"k\":\"߿-\"");          /* U+07FF */
 
     /* 3-byte UTF-8 */
-    check_json_str_utf8 ("\xe0\xa0\x80-tmp", true); /* U+0800 */
-    check_json_str_utf8 ("\xe0\xaf\xb5-tmp", true); /* U+0BF5 ௵ */
-    check_json_str_utf8 ("\xe0\xaf-tmp", false);    /* incomplete */
-    check_json_str_utf8 ("\xe0\xaf", false);        /* incomplete at end of string */
-    check_json_str_utf8 ("\xe0\x80\x80-tmp", false); /* overlong */
-    check_json_str_utf8 ("\xed\x9f\xbf-tmp", true); /* U+D7FF */
-    check_json_str_utf8 ("\xed\xa0\x80-tmp", false); /* surrogate U+D800 */
-    check_json_str_utf8 ("\xee\x80\x80-tmp", true); /* U+E000 */
-    check_json_str_utf8 ("\xef\xbf\xbf-tmp", true); /* U+FFFF */
+    ASSERT_JSON ("k", "\xe0\xa0\x80-", "\"k\":\"ࠀ-\"");               /* U+0800 */
+    ASSERT_JSON ("k", "\xe0\xaf\xb5-", "\"k\":\"௵-\"");               /* U+0BF5 */
+    ASSERT_JSON ("k", "\xe0\xaf-",     "\"k_raw\":[224,175,45]");     /* incomplete */
+    ASSERT_JSON ("k", "\xe0\xaf",      "\"k_raw\":[224,175]");        /* incomplete at end of string */
+    ASSERT_JSON ("k", "\xe0\x80\x80-", "\"k_raw\":[224,128,128,45]"); /* overlong */
+    ASSERT_JSON ("k", "\xed\x9f\xbf-", "\"k\":\"퟿-\"");               /* U+D7FF */
+    ASSERT_JSON ("k", "\xed\xa0\x80-", "\"k_raw\":[237,160,128,45]"); /* surrogate U+D800 */
+    ASSERT_JSON ("k", "\xee\x80\x80-", "\"k\":\"-\"");               /* U+E000 */
+    ASSERT_JSON ("k", "\xef\xbf\xbf-", "\"k\":\"￿-\"");               /* U+FFFF */
 
     /* 4-byte UTF-8 */
-    check_json_str_utf8 ("\xf0\x90\x80\x80-tmp", true);  /* U+10000 */
-    check_json_str_utf8 ("\xf0\x9f\x80\x85-tmp", true);  /* U+1F005 🀅 */
-    check_json_str_utf8 ("\xf0\x9f\x80-tmp", false);     /* incomplete */
-    check_json_str_utf8 ("\xf0\x9f\x80", false);         /* incomplete at end of string */
-    check_json_str_utf8 ("\xf0\x80\x80\x80-tmp", false); /* overlong */
-    check_json_str_utf8 ("\xf4\x8f\xbf\xbf-tmp", true);  /* U+10FFFF */
-    check_json_str_utf8 ("\xf4\x90\x80\x80-tmp", false); /* > U+10FFFF */
+    ASSERT_JSON ("k", "\xf0\x90\x80\x80-", "\"k\":\"𐀀-\"");                   /* U+10000 */
+    ASSERT_JSON ("k", "\xf0\x9f\x80\x85-", "\"k\":\"🀅-\"");                   /* U+1F005 */
+    ASSERT_JSON ("k", "\xf0\x9f\x80-",     "\"k_raw\":[240,159,128,45]");     /* incomplete */
+    ASSERT_JSON ("k", "\xf0\x9f\x80",      "\"k_raw\":[240,159,128]");        /* incomplete at end of string */
+    ASSERT_JSON ("k", "\xf0\x80\x80\x80-", "\"k_raw\":[240,128,128,128,45]"); /* overlong */
+    ASSERT_JSON ("k", "\xf4\x8f\xbf\xbf-", "\"k\":\"􏿿-\"");                   /* U+10FFFF */
+    ASSERT_JSON ("k", "\xf4\x90\x80\x80-", "\"k_raw\":[244,144,128,128,45]"); /* > U+10FFFF */
 
     /* stray continuation bytes */
-    check_json_str_utf8 ("\x80-tmp", false);
-    check_json_str_utf8 ("\xbf-tmp", false);
+    ASSERT_JSON ("k", "\x80-", "\"k_raw\":[128,45]");
+    ASSERT_JSON ("k", "\xbf-", "\"k_raw\":[191,45]");
 }
 
 /* the struct is large, so use a single static one and reset it for each test */
