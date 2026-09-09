@@ -159,7 +159,12 @@ static struct fatrace_event ev;
 static void
 event_init (pid_t pid, const char *comm, uint64_t mask, const char *path)
 {
-    memset (&ev, 0, sizeof ev);
+    /* Sometimes write garbage to the whole structure before resetting */
+    static int alternate_garbage = 0;
+    if (alternate_garbage++ & 1)
+        memset (&ev, 0xa5, sizeof ev);
+    /* Reset the same way as in ../fatrace.c */
+    event_reset (&ev);
     ev.proc.pid = pid;
     strcpy (ev.proc.comm, comm);
     ev.mask = mask;

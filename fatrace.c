@@ -31,6 +31,7 @@
 #include <limits.h>
 #include <mntent.h>
 #include <signal.h>
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -78,7 +79,9 @@ enum fatrace_timestamp {
 };
 
 struct fatrace_event_proc {
-    pid_t pid;
+    /* Make fatrace_event_proc share alignment with fatrace_event. This is
+       assumed by the assertions in event_reset(). */
+    alignas (uint64_t) pid_t pid;
     char comm[TASK_COMM_LEN];   /* "" if unknown */
     char exe[PATH_MAX];         /* "" if unknown or not requested */
 };
@@ -517,6 +520,20 @@ get_exe (int proc_fd, pid_t pid, char *exe, size_t exe_size) {
     exe[len] = '\0';
 }
 
+/* Initialize or reinitialize a struct fatrace_event  */
+static void
+event_reset (struct fatrace_event* ev)
+{
+    /* parents[] is the bulk of the struct and only valid up to parents_len.
+       Assert compile-time that parents[] is the last member, and reset by
+       writing 0 to everything but parents[]. */
+    static_assert (alignof (typeof (*ev)) == alignof (typeof (ev->parents[0])),
+                   "fatrace_event and fatrace_event_proc need to share alignment.");
+    static_assert (sizeof (*ev) == offsetof (typeof (*ev), parents) + sizeof (ev->parents),
+                   "parents[] needs to be the last member of struct fatrace_event");
+    memset (ev, 0, offsetof (typeof (*ev), parents));
+}
+
 /**
  * process_event:
  *
@@ -543,8 +560,7 @@ process_event (const struct fanotify_event_metadata *data,
         return false;
     }
 
-    /* parents[] is the bulk of the struct and only valid up to parents_len */
-    memset (ev, 0, offsetof (struct fatrace_event, parents));
+    event_reset (ev);
     ev->time = *event_time;
     ev->mask = data->mask;
     ev->proc.pid = data->pid;
