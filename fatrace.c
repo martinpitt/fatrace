@@ -329,7 +329,6 @@ process_event (const struct fanotify_event_metadata *data,
             procname[0] = '\0';
         }
     }
-    memcpy (ev->proc.comm, procname, sizeof (procname));
 
     if (option_comm && strcmp (option_comm, procname) != 0 &&
         procname[0] != '\0') {
@@ -337,6 +336,7 @@ process_event (const struct fanotify_event_metadata *data,
             close (event_fd);
         return false;
     }
+    memcpy (ev->proc.comm, procname, sizeof (procname));
 
 #ifdef FAN_REPORT_FID
     if (fid_mode)
