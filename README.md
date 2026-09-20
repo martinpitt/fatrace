@@ -4,7 +4,7 @@
 
 ## Testing
 
-The unit tests for the event formatting do not need any privileges:
+The unit tests do not need any privileges:
 
 ```sh
 make check

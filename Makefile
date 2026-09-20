@@ -3,10 +3,8 @@ PREFIX ?= /usr/local
 
 all: fatrace tests/slow-exit.so tests/simple-touch tests/test-event
 
-fatrace: fatrace.o event.o
-	$(CC) $(LDFLAGS) -o $@ $^
-
-fatrace.o event.o tests/test-event.o: event.h
+fatrace: fatrace.o
+	$(CC) $(LDFLAGS) -o $@ $<
 
 clean:
 	rm -f *.o tests/*.o fatrace tests/slow-exit.so tests/simple-touch tests/test-event
@@ -25,8 +23,10 @@ tests/slow-exit.so: tests/slow-exit.c
 tests/simple-touch: tests/simple-touch.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-tests/test-event: tests/test-event.o event.o
-	$(CC) $(LDFLAGS) -o $@ $^
+tests/test-event.o: fatrace.c
+
+tests/test-event: tests/test-event.o
+	$(CC) $(LDFLAGS) -o $@ $<
 
 check: tests/test-event
 	tests/test-event

@@ -1,4 +1,8 @@
-/* Unit tests for event.c */
+/* Unit tests for functions in fatrace.c */
+
+#define FATRACE_UNIT_TEST
+#include "../fatrace.c"
+#undef FATRACE_UNIT_TEST
 
 #define _GNU_SOURCE
 
@@ -10,8 +14,6 @@
 
 #include <sys/fanotify.h>
 #include <sys/sysmacros.h>
-
-#include "../event.h"
 
 static unsigned checks;
 static unsigned failures;
