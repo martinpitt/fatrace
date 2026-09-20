@@ -1,13 +1,13 @@
 CFLAGS ?= -O2 -g -Wall -Wextra -Werror
 PREFIX ?= /usr/local
 
-all: fatrace tests/slow-exit.so tests/simple-touch tests/test-event
+all: fatrace tests/slow-exit.so tests/simple-touch tests/unit-tests
 
 fatrace: fatrace.o
 	$(CC) $(LDFLAGS) -o $@ $<
 
 clean:
-	rm -f *.o tests/*.o fatrace tests/slow-exit.so tests/simple-touch tests/test-event
+	rm -f *.o tests/*.o fatrace tests/slow-exit.so tests/simple-touch tests/unit-tests
 
 distclean: clean
 
@@ -23,13 +23,13 @@ tests/slow-exit.so: tests/slow-exit.c
 tests/simple-touch: tests/simple-touch.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-tests/test-event.o: fatrace.c
+tests/unit-tests.o: fatrace.c
 
-tests/test-event: tests/test-event.o
+tests/unit-tests: tests/unit-tests.o
 	$(CC) $(LDFLAGS) -o $@ $<
 
-check: tests/test-event
-	tests/test-event
+check: tests/unit-tests
+	tests/unit-tests
 
 lint:
 	ruff check --extend-select E501 --line-length 118 power-usage-report

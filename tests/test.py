@@ -126,7 +126,7 @@ class FatraceTests(unittest.TestCase):
     def test_text_output(self):
         """Text format output
 
-        Details covered in tests/test-event.c; only check that it works at all.
+        Details covered in tests/unit-tests.c; only check that it works at all.
         """
         f = FatraceRunner(["--current-mount", "-s", "2"], json_output=False)
 
@@ -191,7 +191,7 @@ class FatraceTests(unittest.TestCase):
             e["inode"] == test_file_stat.st_ino
         ))
 
-        # non-UTF-8 paths have path_raw instead of path; details are covered in tests/test-event.c
+        # non-UTF-8 paths have path_raw instead of path; details are covered in tests/unit-tests.c
         f.assert_json(lambda e: e["comm"] == "touch" and "path" not in e and
                       e["path_raw"] == list(str(bad_file).encode()))
 
