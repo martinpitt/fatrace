@@ -55,10 +55,20 @@
 /* Likely to be less than /proc/sys/fs/fanotify/max_user_marks */
 #define MAX_DIRS 4096
 
-/* https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html ; not defined in any include file */
-#ifndef TASK_COMM_LEN
-#define TASK_COMM_LEN 16
-#endif
+/* Our buffer for a process name read from /proc, wide enough never to cut a
+   name the kernel did not cut itself: /proc/PID/comm and the comm field of
+   /proc/PID/stat are both rendered by proc_task_name() (fs/proc/array.c)
+   through `char tcomm[64]`. That 64 is a bare literal in the kernel with no
+   name to borrow, and nothing would tell us if it moved, so get_ppid() fails
+   safe once a comm reaches the end of the window it searches. */
+#define FATRACE_COMM_MAX 64
+
+/* The kernel's TASK_COMM_LEN: the buffer PR_SET_NAME and a write to
+   /proc/PID/comm (comm_write(), fs/proc/base.c) copy through, so a *userspace*
+   name is at most FATRACE_USER_COMM_MAX - 1 bytes. Kernel threads are named by
+   the kernel instead -- get_kthread_comm(), wq_worker_comm() -- and are bounded
+   only by FATRACE_COMM_MAX. */
+#define FATRACE_USER_COMM_MAX 16
 
 /* deeper process trees get truncated with a warning */
 #define MAX_PARENTS 64
@@ -82,8 +92,8 @@ struct fatrace_event_proc {
     /* Make fatrace_event_proc share alignment with fatrace_event. This is
        assumed by the assertions in event_reset(). */
     alignas (uint64_t) pid_t pid;
-    char comm[TASK_COMM_LEN];   /* "" if unknown */
-    char exe[PATH_MAX];         /* "" if unknown or not requested */
+    char comm[FATRACE_COMM_MAX]; /* "" if unknown */
+    char exe[PATH_MAX];          /* "" if unknown or not requested */
 };
 
 struct fatrace_event {
@@ -112,7 +122,7 @@ static enum fatrace_timestamp option_timestamp = TIMESTAMP_NONE;
 static bool option_user = false;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
-static char* option_comm = NULL;
+static const char* option_comm = NULL;
 static bool option_json = false;
 static bool option_parents = false;
 static bool option_exe = false;
@@ -461,8 +471,8 @@ format_fatrace_event_json (FILE *out, const struct fatrace_event *ev, enum fatra
     fputs ("}\n", out);
 }
 
-/* given an fd to /proc/PID and a buffer of size TASK_COMM_LEN, try to read the
-   process name. Return true on success. */
+/* given an fd to /proc/PID and a buffer of size FATRACE_COMM_MAX, try to read
+   the process name. Return true on success. */
 static bool
 get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
     int fd = openat (proc_fd, "comm", O_RDONLY);
@@ -484,10 +494,18 @@ get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
     return true;
 }
 
-/* proc_task_name() (fs/proc/array.c) renders comm through a 64 byte buffer, for
-   both /proc/PID/comm and the comm field of /proc/PID/stat; TASK_COMM_LEN (16)
-   bounds only what userspace can set. */
-#define STAT_COMM_MAX 64
+/* Whether a process reported by /proc as @procname is the one the user asked
+   for by name, e.g. with --command. A userspace name is reported cut to
+   FATRACE_USER_COMM_MAX - 1 bytes, and a longer @want could otherwise never
+   match: accept a @procname of exactly that length as a cut form of it. That is
+   the only length that can have been cut, so @want stays a name, not a prefix. */
+static bool
+comm_matches (const char *want, const char *procname) {
+    if (strcmp (want, procname) == 0)
+        return true;
+    size_t len = strlen (procname);
+    return len == FATRACE_USER_COMM_MAX - 1 && strncmp (want, procname, len) == 0;
+}
 
 /* given an fd to /proc/PID, return the parent PID, or 0 if there is none or it
    could not be read -- the latter warns on stderr. A process has no parent PID
@@ -515,13 +533,14 @@ get_ppid (int proc_fd, pid_t pid) {
        may contain ')' and spaces, so skipping it with "%*[^)]" stops at the
        first ')' inside it and lets a process pick the PPID we report for it,
        e.g. by prctl(PR_SET_NAME, "x) R 1"). Every field after COMM is numeric,
-       so COMM's closing ')' is the last ')' within STAT_COMM_MAX bytes of the
-       only '('; searching just that window stays cheap as fields are appended. */
+       so COMM's closing ')' is the last ')' within FATRACE_COMM_MAX bytes of
+       the only '('; searching just that window stays cheap as fields are
+       appended. */
     const char *open_paren = strchr (statbuf, '(');
     if (open_paren != NULL) {
         /* one past the last byte that can hold COMM's closing ')', clamped to
            the end of the string so a short read cannot run off it */
-        const char *end = open_paren + strnlen (open_paren, STAT_COMM_MAX + 1);
+        const char *end = open_paren + strnlen (open_paren, FATRACE_COMM_MAX + 1);
 
         for (const char *p = end - 1; p > open_paren; --p) {
             if (*p != ')')
@@ -579,7 +598,7 @@ process_event (const struct fanotify_event_metadata *data,
 {
     int event_fd = data->fd;
     static char procpath[100];
-    static char procname[TASK_COMM_LEN];
+    static char procname[FATRACE_COMM_MAX];
     static int procname_pid = -1;
     bool got_procname = false;
     pid_t ppid = 0;
@@ -637,7 +656,7 @@ process_event (const struct fanotify_event_metadata *data,
         }
     }
 
-    if (option_comm && strcmp (option_comm, procname) != 0 &&
+    if (option_comm && !comm_matches (option_comm, procname) &&
         procname[0] != '\0') {
         if (event_fd >= 0)
             close (event_fd);
@@ -879,14 +898,15 @@ parse_args (int argc, char** argv)
 
         switch (c) {
             case 'C':
-                option_comm = strdup (optarg);
-                if (!option_comm)
-                    err(EXIT_FAILURE, "memory allocation failed for --command");
-                /* see https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html */
-                if (strlen (option_comm) > TASK_COMM_LEN - 1) {
-                    option_comm[TASK_COMM_LEN - 1] = '\0';
-                    warnx ("--command truncated to %i characters: %s", TASK_COMM_LEN - 1, option_comm);
-                }
+                option_comm = optarg;
+                /* Nothing /proc reports is that long, so only comm_matches()'
+                   allowance for a cut userspace name is left to match on. Say
+                   so rather than cutting the option, which would silently ask
+                   for something else. */
+                if (strlen (option_comm) > FATRACE_COMM_MAX - 1)
+                    warnx ("--command is longer than the %i characters /proc reports a name in; only a "
+                           "process whose name the kernel cut to its first %i can still match it",
+                           FATRACE_COMM_MAX - 1, FATRACE_USER_COMM_MAX - 1);
                 break;
 
             case 'c':

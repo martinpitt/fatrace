@@ -216,7 +216,7 @@ class FatraceTests(unittest.TestCase):
         f.assert_json(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
 
     def test_command(self):
-        # command name that exceeds TASK_COMM_LEN (16 chars)
+        # command name longer than the 15 characters the kernel names a process in
         long_cmd = self.tmp_path / "VeryLongTouchCommand"
         # Use our own simple-touch binary instead of /usr/bin/touch, to work with both
         # GNU coreutils (standalone binaries) and Rust coreutils (multi-call binary
@@ -231,7 +231,7 @@ class FatraceTests(unittest.TestCase):
 
         f.finish()
 
-        # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1),
+        # Should find the name as the kernel truncated it (first 15 chars),
         # but not dd nor the file it created
         f.assert_json(lambda e: e["comm"] == "VeryLongTouchCo" and "W" in e["types"] and
                       e["path"] == str(self.tmp_path / "includeme"))

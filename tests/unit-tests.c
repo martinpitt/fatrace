@@ -514,7 +514,7 @@ fake_proc_file (const char *name, const char *content)
 
 /* get_procname() on a /proc/PID/comm with the given contents */
 #define ASSERT_PROCNAME(comm, expected_ok, expected) do { \
-    char buf_[TASK_COMM_LEN] = "unset"; \
+    char buf_[FATRACE_COMM_MAX] = "unset"; \
     fake_proc_start (); \
     if (comm) \
         fake_proc_file ("comm", (comm)); \
@@ -547,7 +547,7 @@ fake_proc_file (const char *name, const char *content)
 static void
 test_proc_real_process (void)
 {
-    char comm[TASK_COMM_LEN];
+    char comm[FATRACE_COMM_MAX];
     char exe[PATH_MAX];
     char self[PATH_MAX];
 
@@ -646,6 +646,9 @@ test_get_ppid (void)
     ASSERT_INT_EQ (ppid, 0);
 }
 
+/* the longest name the kernel can print, 63 bytes */
+#define COMM_63 "012345678901234567890123456789012345678901234567890123456789abc"
+
 static void
 test_get_procname (void)
 {
@@ -659,15 +662,84 @@ test_get_procname (void)
     ASSERT_PROCNAME ("ev\n\n", true, "ev\n");
     ASSERT_PROCNAME ("\n\n", true, "\n");
     ASSERT_PROCNAME ("1234567890123\n\n", true, "1234567890123\n");
-    /* comm holds TASK_COMM_LEN-1 characters */
+    /* 15 bytes is as long as a userspace process gets: writing comm, like
+     * PR_SET_NAME, truncates there */
     ASSERT_PROCNAME ("123456789012345\n", true, "123456789012345");
-    /* anything longer is truncated to what fits */
-    ASSERT_PROCNAME ("1234567890123456789\n", true, "123456789012345");
+    /* ... and those 15 bytes may themselves end in a newline */
+    ASSERT_PROCNAME ("12345678901234\n\n", true, "12345678901234\n");
+    /* a kernel thread is not named that way and is not bounded by that:
+     * get_kthread_comm() prints a kthread's full name and wq_worker_comm()
+     * appends the work item a worker is running, both through the 64 byte
+     * buffer proc_task_name() (fs/proc/array.c) formats comm in */
+    ASSERT_PROCNAME ("kworker/u16:2-events_unbound\n", true, "kworker/u16:2-events_unbound");
+    /* 63 bytes is all that buffer can hold ... */
+    ASSERT_PROCNAME (COMM_63 "\n", true, COMM_63);
+    /* ... so anything longer cannot occur, and is truncated to what fits */
+    ASSERT_PROCNAME (COMM_63 "d\n", true, COMM_63);
     /* names are free-form: no quoting or escaping is applied */
     ASSERT_PROCNAME ("x) R 1\n", true, "x) R 1");
     ASSERT_PROCNAME ("a b\tc\n", true, "a b\tc");
     /* no comm file */
     ASSERT_PROCNAME (NULL, false, "");
+}
+
+/* A name is copied into the event verbatim, so it has to survive the trip
+ * from /proc all the way into the output too. */
+static void
+test_format_event_kthread_comm (void)
+{
+    event_init (1234, "", FAN_OPEN, "/tmp/x");
+    fake_proc_start ();
+    fake_proc_file ("comm", "kworker/u16:2-events_unbound\n");
+    ASSERT_INT_EQ (get_procname (fake_proc_fd, 1234, ev.proc.comm, sizeof ev.proc.comm), true);
+    ASSERT_STREQ (text (), "kworker/u16:2-events_unbound(1234): O   /tmp/x\n");
+    ASSERT_STREQ (json (), "{\"comm\":\"kworker/u16:2-events_unbound\",\"pid\":1234,"
+                           "\"types\":\"O\",\"path\":\"/tmp/x\"}\n");
+}
+
+static void
+test_comm_matches (void)
+{
+    ASSERT_INT_EQ (comm_matches ("bash", "bash"), true);
+    ASSERT_INT_EQ (comm_matches ("bash", "dash"), false);
+    ASSERT_INT_EQ (comm_matches ("bash", ""), false);
+    ASSERT_INT_EQ (comm_matches ("", ""), true);
+    /* a name the kernel did not cut has to match in full, not as a prefix */
+    ASSERT_INT_EQ (comm_matches ("bash", "ba"), false);
+    ASSERT_INT_EQ (comm_matches ("bash", "bashful"), false);
+
+    /* the kernel reports a userspace name cut to 15 bytes, so the whole name
+     * the user typed still selects the program they meant */
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCo"), true);
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCx"), false);
+    /* only a name of exactly that length can have been cut */
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchC"), false);
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCom"), false);
+
+    /* a kernel thread's name is reported in full, and matches as it stands */
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-events_unbound"), true);
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-events_unbounx"), false);
+    /* ... and one cut to 15 bytes is indistinguishable from a userspace name */
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-e"), true);
+
+    /* @want may be longer than any name /proc can report -- fatrace warns
+     * about that but does not cut it -- and then only the kernel's cut of a
+     * userspace name is left to match against */
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "012345678901234"), true);
+    ASSERT_INT_EQ (comm_matches (COMM_63 COMM_63, "012345678901234"), true);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "01234567890123x"), false);
+    /* a name /proc did report in full still has to be equal to it, whether it
+     * is the longest one possible ... */
+    ASSERT_INT_EQ (comm_matches (COMM_63, COMM_63), true);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", COMM_63), false);
+    /* ... or the shortest one no userspace process can have */
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "0123456789012345"), false);
+
+    /* the cut form is a name of exactly 15 bytes, not a prefix of one: a
+     * shorter @want does not match it either */
+    ASSERT_INT_EQ (comm_matches ("bash", "bash-completion"), false);
+    ASSERT_INT_EQ (comm_matches ("", "012345678901234"), false);
+    ASSERT_INT_EQ (comm_matches ("012345678901234", "012345678901234"), true);
 }
 
 static void
@@ -695,6 +767,8 @@ main (void)
     test_proc_real_process ();
     test_get_ppid ();
     test_get_procname ();
+    test_format_event_kthread_comm ();
+    test_comm_matches ();
     test_get_exe ();
     fake_proc_end ();
 
