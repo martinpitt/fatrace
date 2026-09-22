@@ -203,8 +203,9 @@ E. g. use \fB\-\-filter=OC\fR to only show open and close events.
 .TP
 .B \-C \fICOMMAND\fR, \fB\-\-command=\fICOMMAND
 Show only events for this command. \fICOMMAND\fR is matched against the process
-name as described above, and also matches a process whose name the kernel
-abbreviated to the first 15 characters of \fICOMMAND\fR.
+name as described above, and also matches a userspace process whose name the
+kernel abbreviated to the first 15 characters of \fICOMMAND\fR. A kernel
+thread, whose name is reported in full, has to match \fICOMMAND\fR exactly.
 
 .TP
 .B \-j\fR, \fB\-\-json

@@ -497,12 +497,21 @@ fake_proc_file (const char *name, const char *content)
     } \
 } while (0)
 
-/* get_ppid() on a /proc/PID/stat with the given contents */
+/* the parent PID get_proc_stat() reads, 0 if it could not read one */
+static pid_t
+stat_ppid (int proc_fd, pid_t pid)
+{
+    pid_t ppid = 0;
+    get_proc_stat (proc_fd, pid, NULL, 0, &ppid, NULL);
+    return ppid;
+}
+
+/* get_proc_stat()'s parent PID for a /proc/PID/stat with the given contents */
 #define ASSERT_PPID(stat, expected) do { \
     fake_proc_start (); \
     fake_proc_file ("stat", (stat)); \
     int saved_ = mute_stderr (); \
-    pid_t ppid_ = get_ppid (fake_proc_fd, 1234); \
+    pid_t ppid_ = stat_ppid (fake_proc_fd, 1234); \
     unmute_stderr (saved_); \
     checks++; \
     if (ppid_ != (expected)) { \
@@ -510,6 +519,29 @@ fake_proc_file (const char *name, const char *content)
         fprintf (stderr, "%s:%d: FAIL\n  stat:     %s\n  expected: %i\n  actual:   %i\n", \
                  __FILE__, __LINE__, (stat), (int) (expected), (int) ppid_); \
     } \
+} while (0)
+
+/* get_proc_stat()'s process name for a /proc/PID/stat with the given contents */
+#define ASSERT_STAT_COMM(stat, expected_ok, expected) do { \
+    char buf_[FATRACE_COMM_MAX] = "unset"; \
+    fake_proc_start (); \
+    fake_proc_file ("stat", (stat)); \
+    int saved_ = mute_stderr (); \
+    bool ok_ = get_proc_stat (fake_proc_fd, 1234, buf_, sizeof buf_, NULL, NULL); \
+    unmute_stderr (saved_); \
+    ASSERT_INT_EQ (ok_, (expected_ok)); \
+    ASSERT_STREQ (buf_, (expected)); \
+} while (0)
+
+/* get_proc_stat()'s kernel-thread flag for a /proc/PID/stat with the given contents */
+#define ASSERT_KTHREAD(stat, expected) do { \
+    bool kthread_ = true; \
+    fake_proc_start (); \
+    fake_proc_file ("stat", (stat)); \
+    int saved_ = mute_stderr (); \
+    get_proc_stat (fake_proc_fd, 1234, NULL, 0, NULL, &kthread_); \
+    unmute_stderr (saved_); \
+    ASSERT_INT_EQ (kthread_, (expected)); \
 } while (0)
 
 /* get_procname() on a /proc/PID/comm with the given contents */
@@ -560,7 +592,7 @@ test_proc_real_process (void)
 
     /* an ordinary process name */
     child_start ("fatrace-child");
-    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (stat_ppid (child_proc_fd, child_pid), getpid ());
     ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, comm, sizeof comm), true);
     ASSERT_STREQ (comm, "fatrace-child");
     get_exe (child_proc_fd, child_pid, exe, sizeof exe);
@@ -571,25 +603,25 @@ test_proc_real_process (void)
      * /proc/PID/stat, so a process must not be able to pick the ppid we
      * report for it */
     child_start ("x) R 1");
-    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (stat_ppid (child_proc_fd, child_pid), getpid ());
     ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, comm, sizeof comm), true);
     ASSERT_STREQ (comm, "x) R 1");
     child_end ();
 
     /* ... nor an arbitrary one */
     child_start ("x) R 99999");
-    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (stat_ppid (child_proc_fd, child_pid), getpid ());
     child_end ();
 
     /* ... nor break the parse and lose its ancestry altogether */
     child_start ("a)b");
-    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (stat_ppid (child_proc_fd, child_pid), getpid ());
     child_end ();
 
     /* PR_SET_NAME does not reject a newline either, and /proc/PID/comm appends
      * one of its own, which must not be mistaken for part of the name */
     child_start ("ev\n");
-    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (stat_ppid (child_proc_fd, child_pid), getpid ());
     ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, comm, sizeof comm), true);
     ASSERT_STREQ (comm, "ev\n");
     child_end ();
@@ -598,12 +630,39 @@ test_proc_real_process (void)
     child_start ("123456789012345");
     ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, comm, sizeof comm), true);
     ASSERT_STREQ (comm, "123456789012345");
-    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (stat_ppid (child_proc_fd, child_pid), getpid ());
     child_end ();
 }
 
+/* Which file we read the name from depends on unrelated options, so the two
+ * readers have to agree on it for every name a process can have. */
 static void
-test_get_ppid (void)
+test_proc_readers_agree (void)
+{
+    static const char *const names[] = {
+        "fatrace-child", "x) R 1", "a)b", "()", ") (", "ev\n", "a b\tc", "", "123456789012345",
+    };
+
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; ++i) {
+        char from_comm[FATRACE_COMM_MAX], from_stat[FATRACE_COMM_MAX];
+        pid_t ppid = 0;
+        bool is_kthread = true;
+
+        child_start (names[i]);
+        ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, from_comm, sizeof from_comm), true);
+        ASSERT_INT_EQ (get_proc_stat (child_proc_fd, child_pid, from_stat, sizeof from_stat,
+                                      &ppid, &is_kthread), true);
+        ASSERT_STREQ (from_stat, names[i]);
+        ASSERT_STREQ (from_stat, from_comm);
+        ASSERT_INT_EQ (ppid, getpid ());
+        /* a forked test process is not a kernel thread */
+        ASSERT_INT_EQ (is_kthread, false);
+        child_end ();
+    }
+}
+
+static void
+test_get_proc_stat_ppid (void)
 {
     ASSERT_PPID ("1234 (bash) S 42 1234 1234 0 -1 4194304 1 2 3", 42);
     /* pid 1 has no parent */
@@ -627,7 +686,7 @@ test_get_ppid (void)
     ASSERT_PPID ("1234 (012345678901234567890123456789012345678901234567890123456789ab)) S 42 1234", 42);
 
     /* a comm of 64 bytes cannot occur, and falls outside the window
-     * get_ppid() searches: report unknown rather than risk a value that
+     * get_proc_stat() searches: report unknown rather than risk a value that
      * comm picked */
     ASSERT_PPID ("1234 (012345678901234567890123456789012345678901234567890123456789abcd) S 42 1234", 0);
 
@@ -641,13 +700,53 @@ test_get_ppid (void)
     /* no stat file at all */
     fake_proc_start ();
     int saved = mute_stderr ();
-    pid_t ppid = get_ppid (fake_proc_fd, 1234);
+    pid_t ppid = stat_ppid (fake_proc_fd, 1234);
     unmute_stderr (saved);
     ASSERT_INT_EQ (ppid, 0);
 }
 
 /* the longest name the kernel can print, 63 bytes */
 #define COMM_63 "012345678901234567890123456789012345678901234567890123456789abc"
+
+/* the name between the parentheses of stat has to come out the same as the one
+ * get_procname() reads from comm; test_proc_readers_agree() covers the names
+ * the running kernel can be made to produce, these the ones it cannot */
+static void
+test_get_proc_stat_comm (void)
+{
+    ASSERT_STAT_COMM ("1234 (bash) S 42 1234 1234 0 -1 4194304 1 2 3", true, "bash");
+    ASSERT_STAT_COMM ("1234 () S 42 1234", true, "");
+    /* comm is not escaped and may contain ')', spaces and newlines */
+    ASSERT_STAT_COMM ("1234 (x) R 1) S 42 1234", true, "x) R 1");
+    ASSERT_STAT_COMM ("1234 (a)b) S 42 1234", true, "a)b");
+    ASSERT_STAT_COMM ("1234 ()))) S 42 1234", true, ")))");
+    ASSERT_STAT_COMM ("1234 (()) S 42 1234", true, "()");
+    ASSERT_STAT_COMM ("1234 (ev\n) R 1) S 42 1234", true, "ev\n) R 1");
+    /* a kernel thread's name, in full */
+    ASSERT_STAT_COMM ("1234 (kworker/u16:2-events_unbound) S 2 0 0 0 -1 2129984", true,
+                      "kworker/u16:2-events_unbound");
+    ASSERT_STAT_COMM ("1234 (" COMM_63 ") S 42 1234", true, COMM_63);
+    /* 64 bytes cannot occur, and is reported as unknown rather than guessed */
+    ASSERT_STAT_COMM ("1234 (" COMM_63 "d) S 42 1234", false, "");
+
+    /* malformed input is reported as unknown rather than guessed */
+    ASSERT_STAT_COMM ("", false, "");
+    ASSERT_STAT_COMM ("1234 bash S 42 1234", false, "");
+    ASSERT_STAT_COMM ("1234 (bash", false, "");
+    ASSERT_STAT_COMM ("1234 (bash) S x", false, "");
+}
+
+static void
+test_get_proc_stat_kthread (void)
+{
+    /* field 9 is task->flags, emitted unmasked; PF_KTHREAD is 0x00200000 */
+    ASSERT_KTHREAD ("2 (kthreadd) S 0 0 0 0 -1 2129984 0 0 0 0", true);
+    ASSERT_KTHREAD ("1234 (bash) S 42 1234 1234 0 -1 4194304 1 2 3", false);
+    /* a process may not name itself into the flags field */
+    ASSERT_KTHREAD ("1234 (x) R 1 1 1 1 1 2129984) S 42 1234 1234 0 -1 4194304 1", false);
+    /* without a flags field we cannot tell, and say so on stderr */
+    ASSERT_KTHREAD ("1234 (bash) S 42 1234", false);
+}
 
 static void
 test_get_procname (void)
@@ -700,46 +799,49 @@ test_format_event_kthread_comm (void)
 static void
 test_comm_matches (void)
 {
-    ASSERT_INT_EQ (comm_matches ("bash", "bash"), true);
-    ASSERT_INT_EQ (comm_matches ("bash", "dash"), false);
-    ASSERT_INT_EQ (comm_matches ("bash", ""), false);
-    ASSERT_INT_EQ (comm_matches ("", ""), true);
+    ASSERT_INT_EQ (comm_matches ("bash", "bash", false), true);
+    ASSERT_INT_EQ (comm_matches ("bash", "dash", false), false);
+    ASSERT_INT_EQ (comm_matches ("bash", "", false), false);
+    ASSERT_INT_EQ (comm_matches ("", "", false), true);
     /* a name the kernel did not cut has to match in full, not as a prefix */
-    ASSERT_INT_EQ (comm_matches ("bash", "ba"), false);
-    ASSERT_INT_EQ (comm_matches ("bash", "bashful"), false);
+    ASSERT_INT_EQ (comm_matches ("bash", "ba", false), false);
+    ASSERT_INT_EQ (comm_matches ("bash", "bashful", false), false);
 
     /* the kernel reports a userspace name cut to 15 bytes, so the whole name
      * the user typed still selects the program they meant */
-    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCo"), true);
-    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCx"), false);
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCo", false), true);
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCx", false), false);
     /* only a name of exactly that length can have been cut */
-    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchC"), false);
-    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCom"), false);
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchC", false), false);
+    ASSERT_INT_EQ (comm_matches ("VeryLongTouchCommand", "VeryLongTouchCom", false), false);
 
     /* a kernel thread's name is reported in full, and matches as it stands */
-    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-events_unbound"), true);
-    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-events_unbounx"), false);
-    /* ... and one cut to 15 bytes is indistinguishable from a userspace name */
-    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-e"), true);
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-events_unbound", true), true);
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-events_unbounx", true), false);
+    /* ... and nothing was cut off it, so it does not prefix-match either,
+     * even where a userspace name of the same length would */
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-e", true), false);
+    ASSERT_INT_EQ (comm_matches ("kworker/u16:2-events_unbound", "kworker/u16:2-e", false), true);
 
     /* @want may be longer than any name /proc can report -- fatrace warns
      * about that but does not cut it -- and then only the kernel's cut of a
      * userspace name is left to match against */
-    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "012345678901234"), true);
-    ASSERT_INT_EQ (comm_matches (COMM_63 COMM_63, "012345678901234"), true);
-    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "01234567890123x"), false);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "012345678901234", false), true);
+    ASSERT_INT_EQ (comm_matches (COMM_63 COMM_63, "012345678901234", false), true);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "01234567890123x", false), false);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "012345678901234", true), false);
     /* a name /proc did report in full still has to be equal to it, whether it
      * is the longest one possible ... */
-    ASSERT_INT_EQ (comm_matches (COMM_63, COMM_63), true);
-    ASSERT_INT_EQ (comm_matches (COMM_63 "d", COMM_63), false);
+    ASSERT_INT_EQ (comm_matches (COMM_63, COMM_63, true), true);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", COMM_63, true), false);
     /* ... or the shortest one no userspace process can have */
-    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "0123456789012345"), false);
+    ASSERT_INT_EQ (comm_matches (COMM_63 "d", "0123456789012345", false), false);
 
     /* the cut form is a name of exactly 15 bytes, not a prefix of one: a
      * shorter @want does not match it either */
-    ASSERT_INT_EQ (comm_matches ("bash", "bash-completion"), false);
-    ASSERT_INT_EQ (comm_matches ("", "012345678901234"), false);
-    ASSERT_INT_EQ (comm_matches ("012345678901234", "012345678901234"), true);
+    ASSERT_INT_EQ (comm_matches ("bash", "bash-completion", false), false);
+    ASSERT_INT_EQ (comm_matches ("", "012345678901234", false), false);
+    ASSERT_INT_EQ (comm_matches ("012345678901234", "012345678901234", false), true);
 }
 
 static void
@@ -765,7 +867,10 @@ main (void)
     test_print_json_str ();
     test_format_event ();
     test_proc_real_process ();
-    test_get_ppid ();
+    test_proc_readers_agree ();
+    test_get_proc_stat_ppid ();
+    test_get_proc_stat_comm ();
+    test_get_proc_stat_kthread ();
     test_get_procname ();
     test_format_event_kthread_comm ();
     test_comm_matches ();

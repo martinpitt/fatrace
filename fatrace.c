@@ -498,44 +498,63 @@ get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
    for by name, e.g. with --command. A userspace name is reported cut to
    FATRACE_USER_COMM_MAX - 1 bytes, and a longer @want could otherwise never
    match: accept a @procname of exactly that length as a cut form of it. That is
-   the only length that can have been cut, so @want stays a name, not a prefix. */
+   the only length that can have been cut, so @want stays a name, not a prefix.
+   A kernel thread is named by the kernel and reported in full, so there is
+   nothing to undo for it and @want has to be equal. */
 static bool
-comm_matches (const char *want, const char *procname) {
+comm_matches (const char *want, const char *procname, bool is_kthread) {
     if (strcmp (want, procname) == 0)
         return true;
+    if (is_kthread)
+        return false;
     size_t len = strlen (procname);
     return len == FATRACE_USER_COMM_MAX - 1 && strncmp (want, procname, len) == 0;
 }
 
-/* given an fd to /proc/PID, return the parent PID, or 0 if there is none or it
-   could not be read -- the latter warns on stderr. A process has no parent PID
-   when it is pid 1, when it is pid 2 (kthreadd, whose parent is the idle task),
-   or when its parent lives in an ancestor PID namespace, as after
-   "docker exec"; the chain does not always end at pid 1. */
-static pid_t
-get_ppid (int proc_fd, pid_t pid) {
+/* task->flags is field 9 of /proc/PID/stat, emitted unmasked; PF_KTHREAD is
+   internal to the kernel (include/linux/sched.h) and in no userspace header */
+#define PF_KTHREAD 0x00200000
+
+/* Read /proc/PID/stat through @proc_fd, filling in whichever of @procname
+   (buffer of FATRACE_COMM_MAX bytes), @ppid and @is_kthread are not NULL.
+   Return true on success; on failure warn, and leave "", 0 and false behind.
+
+   @ppid is 0 when the process has no parent: pid 1, pid 2 (kthreadd, whose
+   parent is the idle task), or a process whose parent lives in an ancestor PID
+   namespace, as after "docker exec". The chain does not always end at pid 1. */
+static bool
+get_proc_stat (int proc_fd, pid_t pid, char *procname, size_t procname_size,
+               pid_t *ppid, bool *is_kthread) {
     static char statbuf[4096];
+
+    if (procname != NULL)
+        procname[0] = '\0';
+    if (ppid != NULL)
+        *ppid = 0;
+    if (is_kthread != NULL)
+        *is_kthread = false;
+
     int stat_fd = openat (proc_fd, "stat", O_RDONLY);
     if (stat_fd < 0) {
         warn ("failed to open /proc/%u/stat", pid);
-        return 0;
+        return false;
     }
     ssize_t len = read (stat_fd, statbuf, sizeof (statbuf));
     close (stat_fd);
     if (len < 0) {
         warn ("failed to read /proc/%u/stat", pid);
-        return 0;
+        return false;
     }
     /* buffer is static, and read() does not nul terminate */
     statbuf[MIN(len, sizeof (statbuf) - 1)] = '\0';
 
-    /* The format is "PID (COMM) STATE PPID ...". COMM is printed unescaped and
-       may contain ')' and spaces, so skipping it with "%*[^)]" stops at the
-       first ')' inside it and lets a process pick the PPID we report for it,
-       e.g. by prctl(PR_SET_NAME, "x) R 1"). Every field after COMM is numeric,
-       so COMM's closing ')' is the last ')' within FATRACE_COMM_MAX bytes of
-       the only '('; searching just that window stays cheap as fields are
-       appended. */
+    /* The format is "PID (COMM) STATE PPID PGRP SESSION TTY TPGID FLAGS ...".
+       COMM is printed unescaped and may contain ')' and spaces, so skipping it
+       with "%*[^)]" stops at the first ')' inside it and lets a process pick
+       the PPID we report for it, e.g. by prctl(PR_SET_NAME, "x) R 1"). Every
+       field after COMM is numeric, so COMM's closing ')' is the last ')' within
+       FATRACE_COMM_MAX bytes of the only '('; searching just that window stays
+       cheap as fields are appended. */
     const char *open_paren = strchr (statbuf, '(');
     if (open_paren != NULL) {
         /* one past the last byte that can hold COMM's closing ')', clamped to
@@ -545,9 +564,25 @@ get_ppid (int proc_fd, pid_t pid) {
         for (const char *p = end - 1; p > open_paren; --p) {
             if (*p != ')')
                 continue;
-            pid_t ret;
-            if (sscanf (p + 1, " %*c %d", &ret) == 1)
-                return ret;
+            pid_t parent;
+            unsigned long flags;
+            int fields = sscanf (p + 1, " %*c %d %*d %*d %*d %*d %lu", &parent, &flags);
+            if (fields >= 1) {
+                if (procname != NULL) {
+                    size_t comm_len = MIN ((size_t) (p - open_paren - 1), procname_size - 1);
+                    memcpy (procname, open_paren + 1, comm_len);
+                    procname[comm_len] = '\0';
+                }
+                if (ppid != NULL)
+                    *ppid = parent;
+                if (is_kthread != NULL) {
+                    if (fields == 2)
+                        *is_kthread = (flags & PF_KTHREAD) != 0;
+                    else
+                        warnx ("failed to read the flags field of /proc/%u/stat: %s", pid, statbuf);
+                }
+                return true;
+            }
             /* an earlier ')' would only yield a PPID that COMM chose */
             break;
         }
@@ -555,7 +590,7 @@ get_ppid (int proc_fd, pid_t pid) {
 
     /* this *really* should not happen, kernel API change  */
     warnx ("failed to parse /proc/%u/stat, please file a bug: %s", pid, statbuf);
-    return 0;
+    return false;
 }
 
 /* read /proc/PID/exe; "" on failure */
@@ -600,8 +635,16 @@ process_event (const struct fanotify_event_metadata *data,
     static char procpath[100];
     static char procname[FATRACE_COMM_MAX];
     static int procname_pid = -1;
+    static bool procname_is_kthread = false;
     bool got_procname = false;
+    bool is_kthread = false;
     pid_t ppid = 0;
+
+    /* stat carries the name, the parent PID and the kernel-thread flag in one
+       read, where comm carries only the name but is cheaper. The flag is only
+       needed where comm_matches() may have to undo a name the kernel cut. */
+    bool need_stat = option_parents ||
+                     (option_comm && strlen (option_comm) > FATRACE_USER_COMM_MAX - 1);
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
@@ -617,12 +660,15 @@ process_event (const struct fanotify_event_metadata *data,
     snprintf (procpath, sizeof (procpath), "/proc/%i", data->pid);
     int proc_fd = open (procpath, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
-        if (option_parents)
-            ppid = get_ppid (proc_fd, data->pid);
+        if (need_stat)
+            got_procname = get_proc_stat (proc_fd, data->pid, procname, sizeof (procname),
+                                          option_parents ? &ppid : NULL, &is_kthread);
+        else
+            got_procname = get_procname (proc_fd, data->pid, procname, sizeof (procname));
 
-        if (get_procname (proc_fd, data->pid, procname, sizeof (procname))) {
+        if (got_procname) {
             procname_pid = data->pid;
-            got_procname = true;
+            procname_is_kthread = is_kthread;
         }
 
         /* /proc/PID is owned by the process' user and group */
@@ -649,6 +695,7 @@ process_event (const struct fanotify_event_metadata *data,
     if (!got_procname) {
         if (data->pid == procname_pid) {
             debug ("re-using cached procname value %s for pid %i", procname, procname_pid);
+            is_kthread = procname_is_kthread;
         } else if (procname_pid >= 0) {
             debug ("invalidating previously cached procname %s for pid %i", procname, procname_pid);
             procname_pid = -1;
@@ -656,7 +703,7 @@ process_event (const struct fanotify_event_metadata *data,
         }
     }
 
-    if (option_comm && !comm_matches (option_comm, procname) &&
+    if (option_comm && !comm_matches (option_comm, procname, is_kthread) &&
         procname[0] != '\0') {
         if (event_fd >= 0)
             close (event_fd);
@@ -702,15 +749,13 @@ process_event (const struct fanotify_event_metadata *data,
         snprintf (procpath, sizeof (procpath), "/proc/%i", ppid);
         int ppid_dir_fd = open (procpath, O_RDONLY | O_DIRECTORY);
         if (ppid_dir_fd >= 0) {
-            get_procname (ppid_dir_fd, ppid, parent->comm, sizeof (parent->comm));
+            /* one read for both this parent's name and the next one */
+            pid_t next_ppid;
+            get_proc_stat (ppid_dir_fd, ppid, parent->comm, sizeof (parent->comm), &next_ppid, NULL);
             if (option_exe)
                 get_exe (ppid_dir_fd, ppid, parent->exe, sizeof (parent->exe));
-            /* get next parent */
-            if (ppid == 1)
-                ppid = 0;
-            else
-                ppid = get_ppid (ppid_dir_fd, ppid);
             close (ppid_dir_fd);
+            ppid = next_ppid;
         } else {
             warn ("failed to open %s", procpath);
             ppid = 0;
@@ -899,14 +944,20 @@ parse_args (int argc, char** argv)
         switch (c) {
             case 'C':
                 option_comm = optarg;
-                /* Nothing /proc reports is that long, so only comm_matches()'
-                   allowance for a cut userspace name is left to match on. Say
-                   so rather than cutting the option, which would silently ask
-                   for something else. */
+                /* comm_matches() accepts a name the kernel cut, which is a
+                   surprise exactly when the argument is too long to be a
+                   userspace name. Say so rather than cutting the argument,
+                   which would silently ask for something else. */
                 if (strlen (option_comm) > FATRACE_COMM_MAX - 1)
-                    warnx ("--command is longer than the %i characters /proc reports a name in; only a "
-                           "process whose name the kernel cut to its first %i can still match it",
-                           FATRACE_COMM_MAX - 1, FATRACE_USER_COMM_MAX - 1);
+                    warnx ("--command is longer than the %i characters /proc reports a name in, so no "
+                           "name can equal it; only a userspace process whose name the kernel cut to "
+                           "\"%.*s\" matches",
+                           FATRACE_COMM_MAX - 1, FATRACE_USER_COMM_MAX - 1, option_comm);
+                else if (strlen (option_comm) > FATRACE_USER_COMM_MAX - 1)
+                    warnx ("--command is longer than the %i characters a userspace process is named "
+                           "in, so it also matches any userspace process whose name the kernel cut to "
+                           "\"%.*s\"; a kernel thread, reported under its full name, has to equal it",
+                           FATRACE_USER_COMM_MAX - 1, FATRACE_USER_COMM_MAX - 1, option_comm);
                 break;
 
             case 'c':
