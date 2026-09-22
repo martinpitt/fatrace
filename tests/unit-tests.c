@@ -586,6 +586,14 @@ test_proc_real_process (void)
     ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
     child_end ();
 
+    /* PR_SET_NAME does not reject a newline either, and /proc/PID/comm appends
+     * one of its own, which must not be mistaken for part of the name */
+    child_start ("ev\n");
+    ASSERT_INT_EQ (get_ppid (child_proc_fd, child_pid), getpid ());
+    ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, comm, sizeof comm), true);
+    ASSERT_STREQ (comm, "ev\n");
+    child_end ();
+
     /* a name that fills comm exactly */
     child_start ("123456789012345");
     ASSERT_INT_EQ (get_procname (child_proc_fd, child_pid, comm, sizeof comm), true);
@@ -647,6 +655,10 @@ test_get_procname (void)
     /* an empty name is not an error */
     ASSERT_PROCNAME ("\n", true, "");
     ASSERT_PROCNAME ("", true, "");
+    /* the kernel appends exactly one newline, so a name ending in one keeps it */
+    ASSERT_PROCNAME ("ev\n\n", true, "ev\n");
+    ASSERT_PROCNAME ("\n\n", true, "\n");
+    ASSERT_PROCNAME ("1234567890123\n\n", true, "1234567890123\n");
     /* comm holds TASK_COMM_LEN-1 characters */
     ASSERT_PROCNAME ("123456789012345\n", true, "123456789012345");
     /* anything longer is truncated to what fits */

@@ -476,7 +476,9 @@ get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
         warn ("failed to read /proc/%u/comm", pid);
         return false;
     }
-    while (len > 0 && procname[len-1] == '\n')
+    /* the kernel appends exactly one newline; stripping every trailing one
+       would eat a newline the name itself ends in */
+    if (len > 0 && procname[len-1] == '\n')
         len--;
     procname[len] = '\0';
     return true;
