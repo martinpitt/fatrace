@@ -2,5 +2,5 @@
 *.so
 /fatrace
 /tests/simple-touch
-/tests/test-event
+/tests/unit-tests
 __pycache__

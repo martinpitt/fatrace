@@ -126,7 +126,7 @@ class FatraceTests(unittest.TestCase):
     def test_text_output(self):
         """Text format output
 
-        Details covered in tests/test-event.c; only check that it works at all.
+        Details covered in tests/unit-tests.c; only check that it works at all.
         """
         f = FatraceRunner(["--current-mount", "-s", "2"], json_output=False)
 
@@ -191,7 +191,7 @@ class FatraceTests(unittest.TestCase):
             e["inode"] == test_file_stat.st_ino
         ))
 
-        # non-UTF-8 paths have path_raw instead of path; details are covered in tests/test-event.c
+        # non-UTF-8 paths have path_raw instead of path; details are covered in tests/unit-tests.c
         f.assert_json(lambda e: e["comm"] == "touch" and "path" not in e and
                       e["path_raw"] == list(str(bad_file).encode()))
 
@@ -216,7 +216,7 @@ class FatraceTests(unittest.TestCase):
         f.assert_json(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
 
     def test_command(self):
-        # command name that exceeds TASK_COMM_LEN (16 chars)
+        # command name longer than the 15 characters the kernel names a process in
         long_cmd = self.tmp_path / "VeryLongTouchCommand"
         # Use our own simple-touch binary instead of /usr/bin/touch, to work with both
         # GNU coreutils (standalone binaries) and Rust coreutils (multi-call binary
@@ -231,7 +231,7 @@ class FatraceTests(unittest.TestCase):
 
         f.finish()
 
-        # Should find the truncated command name (first 15 chars per TASK_COMM_LEN-1),
+        # Should find the name as the kernel truncated it (first 15 chars),
         # but not dd nor the file it created
         f.assert_json(lambda e: e["comm"] == "VeryLongTouchCo" and "W" in e["types"] and
                       e["path"] == str(self.tmp_path / "includeme"))

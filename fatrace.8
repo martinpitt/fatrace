@@ -50,8 +50,8 @@ In text format, the line has the following fields:
 The current time, if you specify the \fB\-\-timestamp\fR option.
 
 .IP \(bu 2
-Process name. This is read from /proc/pid/comm, which might be abbreviated for
-long process names.
+Process name. This is read from /proc/pid/comm. The kernel abbreviates the name
+of a userspace process to 15 characters; a kernel thread is reported in full.
 
 .IP \(bu 2
 Process ID
@@ -99,13 +99,13 @@ option.
 
 .TP
 .B comm
-Process name. This is read from /proc/pid/comm, which might be abbreviated for
-long process names.
+Process name. This is read from /proc/pid/comm. The kernel abbreviates the name
+of a userspace process to 15 characters; a kernel thread is reported in full.
 
 .TP
 .B comm_raw
-The raw bytes of the process name, in case it is invalid UTF-8 or would require
-escaping.
+The raw bytes of the process name, in case it is invalid UTF-8, would require
+escaping, or contains a control character.
 
 .TP
 .B pid
@@ -143,8 +143,8 @@ The path to the affected file.
 
 .TP
 .B path_raw
-The raw bytes of the path to the affected file, in case it is invalid UTF-8 or
-would require escaping.
+The raw bytes of the path to the affected file, in case it is invalid UTF-8,
+would require escaping, or contains a control character.
 
 .TP
 .B exe
@@ -152,8 +152,8 @@ The path to the executable, if you specify the \fB\-\-exe\fR option.
 
 .TP
 .B exe_raw
-The raw bytes of the executable path, in case it is not valid UTF-8 or would
-require escaping.
+The raw bytes of the executable path, in case it is not valid UTF-8, would
+require escaping, or contains a control character.
 
 .TP
 .B parents
@@ -202,7 +202,10 @@ E. g. use \fB\-\-filter=OC\fR to only show open and close events.
 
 .TP
 .B \-C \fICOMMAND\fR, \fB\-\-command=\fICOMMAND
-Show only events for this command.
+Show only events for this command. \fICOMMAND\fR is matched against the process
+name as described above, and also matches a userspace process whose name the
+kernel abbreviated to the first 15 characters of \fICOMMAND\fR. A kernel
+thread, whose name is reported in full, has to match \fICOMMAND\fR exactly.
 
 .TP
 .B \-j\fR, \fB\-\-json

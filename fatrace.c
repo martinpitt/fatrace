@@ -21,6 +21,7 @@
 #define _LARGEFILE64_SOURCE
 #define _GNU_SOURCE
 
+#include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
 #include <err.h>
@@ -30,12 +31,14 @@
 #include <limits.h>
 #include <mntent.h>
 #include <signal.h>
+#include <stdalign.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <sys/fanotify.h>
@@ -43,15 +46,32 @@
 #include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/statfs.h>
+#include <sys/sysmacros.h>
 #include <sys/time.h>
 #include <sys/types.h>
-
-#include "event.h"
 
 #define BUFSIZE 256*1024
 
 /* Likely to be less than /proc/sys/fs/fanotify/max_user_marks */
 #define MAX_DIRS 4096
+
+/* Our buffer for a process name read from /proc, wide enough never to cut a
+   name the kernel did not cut itself: /proc/PID/comm and the comm field of
+   /proc/PID/stat are both rendered by proc_task_name() (fs/proc/array.c)
+   through `char tcomm[64]`. That 64 is a bare literal in the kernel with no
+   name to borrow, and nothing would tell us if it moved, so get_ppid() fails
+   safe once a comm reaches the end of the window it searches. */
+#define FATRACE_COMM_MAX 64
+
+/* The kernel's TASK_COMM_LEN: the buffer PR_SET_NAME and a write to
+   /proc/PID/comm (comm_write(), fs/proc/base.c) copy through, so a *userspace*
+   name is at most FATRACE_USER_COMM_MAX - 1 bytes. Kernel threads are named by
+   the kernel instead -- get_kthread_comm(), wq_worker_comm() -- and are bounded
+   only by FATRACE_COMM_MAX. */
+#define FATRACE_USER_COMM_MAX 16
+
+/* deeper process trees get truncated with a warning */
+#define MAX_PARENTS 64
 
 #define DEBUG 0
 #if DEBUG
@@ -59,6 +79,39 @@
 #else
 #define debug(...) {}
 #endif
+
+/* data structures */
+
+enum fatrace_timestamp {
+    TIMESTAMP_NONE,
+    TIMESTAMP_LOCAL,    /* HH:MM:SS.uuuuuu wall clock time */
+    TIMESTAMP_EPOCH,    /* seconds.uuuuuu since the epoch */
+};
+
+struct fatrace_event_proc {
+    /* Make fatrace_event_proc share alignment with fatrace_event. This is
+       assumed by the assertions in event_reset(). */
+    alignas (uint64_t) pid_t pid;
+    char comm[FATRACE_COMM_MAX]; /* "" if unknown */
+    char exe[PATH_MAX];          /* "" if unknown or not requested */
+};
+
+struct fatrace_event {
+    struct timeval time;
+    uint64_t mask;
+    struct fatrace_event_proc proc;
+    bool have_ids;
+    uid_t uid;
+    gid_t gid;
+    bool fd_valid;              /* false if the file vanished before it could be looked at;
+                                   then path is "" and have_stat is false */
+    char path[PATH_MAX];        /* "" if unknown */
+    bool have_stat;
+    dev_t dev;
+    ino_t ino;
+    unsigned parents_len;
+    struct fatrace_event_proc parents[MAX_PARENTS];
+};
 
 /* command line options */
 static char* option_output = NULL;
@@ -69,7 +122,7 @@ static enum fatrace_timestamp option_timestamp = TIMESTAMP_NONE;
 static bool option_user = false;
 static pid_t ignored_pids[1024];
 static unsigned int ignored_pids_len = 0;
-static char* option_comm = NULL;
+static const char* option_comm = NULL;
 static bool option_json = false;
 static bool option_parents = false;
 static bool option_exe = false;
@@ -180,6 +233,42 @@ get_fid_event_fd (const struct fanotify_event_metadata *data)
 #endif /* defined(FAN_REPORT_FID) */
 
 /**
+ * mask2str:
+ *
+ * Convert a fanotify_event_metadata mask into a human readable string.
+ *
+ * Returns: decoded mask; only valid until the next call, do not free.
+ */
+static const char*
+mask2str (uint64_t mask)
+{
+    static char buffer[10];
+    int offset = 0;
+
+    if (mask & FAN_ACCESS)
+        buffer[offset++] = 'R';
+    if (mask & FAN_CLOSE_WRITE || mask & FAN_CLOSE_NOWRITE)
+        buffer[offset++] = 'C';
+    if (mask & FAN_MODIFY || mask & FAN_CLOSE_WRITE)
+        buffer[offset++] = 'W';
+    if (mask & FAN_OPEN)
+        buffer[offset++] = 'O';
+#ifdef FAN_REPORT_FID
+    if (mask & FAN_CREATE)
+        buffer[offset++] = '+';
+    if (mask & FAN_DELETE)
+        buffer[offset++] = 'D';
+    if (mask & FAN_MOVED_FROM)
+        buffer[offset++] = '<';
+    if (mask & FAN_MOVED_TO)
+        buffer[offset++] = '>';
+#endif
+    buffer[offset] = '\0';
+
+    return buffer;
+}
+
+/**
  * show_pid:
  *
  * Check if events for given PID should be logged.
@@ -197,8 +286,193 @@ show_pid (pid_t pid)
     return true;
 }
 
-/* given an fd to /proc/PID and a buffer of size TASK_COMM_LEN, try to read the
-   process name. Return true on success. */
+/* if str is a valid UTF-8 string without need of any JSON escaping, return the
+   byte length, otherwise -1. */
+static inline int
+nonfunny_utf8_len (const char* str) {
+    const unsigned char* s = (unsigned char*)str;
+    int i = 0;
+    while (str[i] != 0) {
+        unsigned char c = s[i];
+        // Unescaped ASCII
+        if (// Not C0 control character
+            // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
+            0x20 <= c &&
+            // Not double quote or backslash, which require JSON escaping
+            c != '"' && c != '\\' &&
+            // Not unprintable DEL (0x7f) or non-ASCII
+            c <= 0x7e) {
+            i++; continue;
+        }
+        // it's ok to read s[i+1] since we know s[i] != 0
+        uint32_t mbc = c<<8 | s[i+1];
+        if (// 2-char: 110xxxxx 10xxxxxx
+            (mbc & 0xe0c0) == 0xc080 &&
+            // but not 1100000x 10xxxxxx (overlong)
+            (mbc & 0xfec0) != 0xc080 &&
+            // neither 11000010 100xxxxx (C1 control characters)
+            // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
+            (mbc & 0xffe0) != 0xc280) {
+            i+=2; continue;
+        }
+        if (s[i+1] == 0)
+            return -1;
+        // it's ok to read s[i+2] since we know s[i+1] != 0
+        mbc = mbc<<8 | s[i+2];
+        if (// 3-char: 1110xxxx 10xxxxxx 10xxxxxx
+            (mbc & 0xf0c0c0) == 0xe08080 &&
+            // but not 11100000 100xxxxx 10xxxxxx (overlong)
+            (mbc & 0xffe0c0) != 0xe08080 &&
+            // neither 11101101 101xxxxx 10xxxxxx (reserved for surrogates)
+            (mbc & 0xffe0c0) != 0xeda080) {
+            i+=3; continue;
+        }
+        if (s[i+2] == 0)
+            return -1;
+        // it's ok to read s[i+3] since we know s[i+2] != 0
+        mbc = mbc<<8 | s[i+3];
+        if (// 4-char: 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+            (mbc & 0xf8c0c0c0) == 0xf0808080 &&
+            // but not 11110000 1000xxxx 10xxxxxx 10xxxxxx (overlong)
+            (mbc & 0xfff0c0c0) != 0xf0808080 &&
+            // neither 11110PPP 10PPxxxx 10xxxxxx 10xxxxxx, PPPPP>0x10 (too big)
+            (mbc & 0x07300000) <= 0x04000000) {
+            i+=4; continue;
+        }
+        return -1;
+    }
+    return i;
+}
+
+/* print "key":"value" if value is clean UTF-8, otherwise "key_raw":[bytes...] */
+void
+print_json_str (FILE *out, const char* key, const char* value) {
+    int value_len = nonfunny_utf8_len (value);
+    int key_len = strlen(key);
+    if (value_len >= 0) {
+        putc('"', out);
+        fwrite (key, 1, key_len, out);
+        putc('"', out);
+        putc(':', out);
+        putc('"', out);
+        fwrite (value, 1, value_len, out);
+        putc ('"', out);
+    } else {
+        putc('"', out);
+        fwrite (key, 1, key_len, out);
+        fwrite ("_raw\":[", 1, 7, out);
+        for (int i = 0; value[i] != 0; i++)
+            fprintf (out, i ? ",%d" : "%d", (unsigned int)(unsigned char)(value[i]));
+        putc (']', out);
+    }
+}
+
+/* print time value in the given mode */
+static void
+format_time (FILE *out, const struct timeval *tv, enum fatrace_timestamp mode)
+{
+    assert (mode != TIMESTAMP_NONE);
+    if (mode == TIMESTAMP_LOCAL) {
+        char hms[9];
+        strftime (hms, sizeof hms, "%H:%M:%S", localtime (&tv->tv_sec));
+        fputs (hms, out);
+    } else if (mode == TIMESTAMP_EPOCH) {
+        /* time_t may be wider than long on 32 bit with _TIME_BITS=64 */
+        fprintf (out, "%lli", (long long) tv->tv_sec);
+    }
+    fprintf (out, ".%06li", (long) tv->tv_usec);
+}
+
+void
+format_fatrace_event_text (FILE *out, const struct fatrace_event *ev, enum fatrace_timestamp timestamp_mode)
+{
+    if (timestamp_mode != TIMESTAMP_NONE) {
+        format_time (out, &ev->time, timestamp_mode);
+        putc (' ', out);
+    }
+
+    fprintf (out, "%s(%i)", ev->proc.comm[0] ? ev->proc.comm : "unknown", ev->proc.pid);
+    if (ev->have_ids)
+        fprintf (out, " [%u:%u]", ev->uid, ev->gid);
+    fprintf (out, ": %-3s ", mask2str (ev->mask));
+
+    if (!ev->fd_valid)
+        fputs ("(deleted)", out);
+    else if (ev->path[0])
+        fputs (ev->path, out);
+    else if (ev->have_stat)
+        fprintf (out, "device %u:%u inode %llu", major (ev->dev), minor (ev->dev), (unsigned long long) ev->ino);
+
+    if (ev->proc.exe[0])
+        fprintf (out, " exe=%s", ev->proc.exe);
+
+    for (unsigned i = 0; i < ev->parents_len; ++i) {
+        const struct fatrace_event_proc *p = &ev->parents[i];
+        fprintf (out, "%s(pid=%i", i == 0 ? ", parents=" : ",", p->pid);
+        if (p->comm[0])
+            fprintf (out, " comm=%s", p->comm);
+        if (p->exe[0])
+            fprintf (out, " exe=%s", p->exe);
+        putc (')', out);
+    }
+
+    putc ('\n', out);
+}
+
+void
+format_fatrace_event_json (FILE *out, const struct fatrace_event *ev, enum fatrace_timestamp timestamp_mode)
+{
+    putc ('{', out);
+    if (timestamp_mode != TIMESTAMP_NONE) {
+        /* wall clock time is a string, epoch time a number */
+        const char *quote = timestamp_mode == TIMESTAMP_LOCAL ? "\"" : "";
+        fprintf (out, "\"timestamp\":%s", quote);
+        format_time (out, &ev->time, timestamp_mode);
+        fprintf (out, "%s,", quote);
+    }
+
+    if (ev->proc.comm[0]) {
+        print_json_str (out, "comm", ev->proc.comm);
+        putc (',', out);
+    }
+    fprintf (out, "\"pid\":%i,", ev->proc.pid);
+    if (ev->have_ids)
+        fprintf (out, "\"uid\":%u,\"gid\":%u,", ev->uid, ev->gid);
+    fprintf (out, "\"types\":\"%s\"", mask2str (ev->mask));
+
+    if (ev->have_stat)
+        fprintf (out, ",\"device\":{\"major\":%u,\"minor\":%u},\"inode\":%llu",
+                 major (ev->dev), minor (ev->dev), (unsigned long long) ev->ino);
+    if (ev->path[0]) {
+        putc (',', out);
+        print_json_str (out, "path", ev->path);
+    }
+    if (ev->proc.exe[0]) {
+        putc (',', out);
+        print_json_str (out, "exe", ev->proc.exe);
+    }
+
+    for (unsigned i = 0; i < ev->parents_len; ++i) {
+        const struct fatrace_event_proc *p = &ev->parents[i];
+        fprintf (out, "%s{\"pid\":%i", i == 0 ? ",\"parents\":[" : ",", p->pid);
+        if (p->comm[0]) {
+            putc (',', out);
+            print_json_str (out, "comm", p->comm);
+        }
+        if (p->exe[0]) {
+            putc (',', out);
+            print_json_str (out, "exe", p->exe);
+        }
+        putc ('}', out);
+    }
+    if (ev->parents_len > 0)
+        putc (']', out);
+
+    fputs ("}\n", out);
+}
+
+/* given an fd to /proc/PID and a buffer of size FATRACE_COMM_MAX, try to read
+   the process name. Return true on success. */
 static bool
 get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
     int fd = openat (proc_fd, "comm", O_RDONLY);
@@ -212,37 +486,111 @@ get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
         warn ("failed to read /proc/%u/comm", pid);
         return false;
     }
-    while (len > 0 && procname[len-1] == '\n')
+    /* the kernel appends exactly one newline; stripping every trailing one
+       would eat a newline the name itself ends in */
+    if (len > 0 && procname[len-1] == '\n')
         len--;
     procname[len] = '\0';
     return true;
 }
 
-/* given an fd to /proc/PID, return the parent PID if it can be determined,
-   otherwise 0. */
-static pid_t
-get_ppid (int proc_fd, pid_t pid) {
+/* Whether a process reported by /proc as @procname is the one the user asked
+   for by name, e.g. with --command. A userspace name is reported cut to
+   FATRACE_USER_COMM_MAX - 1 bytes, and a longer @want could otherwise never
+   match: accept a @procname of exactly that length as a cut form of it. That is
+   the only length that can have been cut, so @want stays a name, not a prefix.
+   A kernel thread is named by the kernel and reported in full, so there is
+   nothing to undo for it and @want has to be equal. */
+static bool
+comm_matches (const char *want, const char *procname, bool is_kthread) {
+    if (strcmp (want, procname) == 0)
+        return true;
+    if (is_kthread)
+        return false;
+    size_t len = strlen (procname);
+    return len == FATRACE_USER_COMM_MAX - 1 && strncmp (want, procname, len) == 0;
+}
+
+/* task->flags is field 9 of /proc/PID/stat, emitted unmasked; PF_KTHREAD is
+   internal to the kernel (include/linux/sched.h) and in no userspace header */
+#define PF_KTHREAD 0x00200000
+
+/* Read /proc/PID/stat through @proc_fd, filling in whichever of @procname
+   (buffer of FATRACE_COMM_MAX bytes), @ppid and @is_kthread are not NULL.
+   Return true on success; on failure warn, and leave "", 0 and false behind.
+
+   @ppid is 0 when the process has no parent: pid 1, pid 2 (kthreadd, whose
+   parent is the idle task), or a process whose parent lives in an ancestor PID
+   namespace, as after "docker exec". The chain does not always end at pid 1. */
+static bool
+get_proc_stat (int proc_fd, pid_t pid, char *procname, size_t procname_size,
+               pid_t *ppid, bool *is_kthread) {
     static char statbuf[4096];
+
+    if (procname != NULL)
+        procname[0] = '\0';
+    if (ppid != NULL)
+        *ppid = 0;
+    if (is_kthread != NULL)
+        *is_kthread = false;
+
     int stat_fd = openat (proc_fd, "stat", O_RDONLY);
     if (stat_fd < 0) {
         warn ("failed to open /proc/%u/stat", pid);
-        return 0;
+        return false;
     }
     ssize_t len = read (stat_fd, statbuf, sizeof (statbuf));
     close (stat_fd);
     if (len < 0) {
         warn ("failed to read /proc/%u/stat", pid);
-        return 0;
+        return false;
     }
     /* buffer is static, and read() does not nul terminate */
     statbuf[MIN(len, sizeof (statbuf) - 1)] = '\0';
 
-    pid_t ret;
-    if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
-        return ret;
+    /* The format is "PID (COMM) STATE PPID PGRP SESSION TTY TPGID FLAGS ...".
+       COMM is printed unescaped and may contain ')' and spaces, so skipping it
+       with "%*[^)]" stops at the first ')' inside it and lets a process pick
+       the PPID we report for it, e.g. by prctl(PR_SET_NAME, "x) R 1"). Every
+       field after COMM is numeric, so COMM's closing ')' is the last ')' within
+       FATRACE_COMM_MAX bytes of the only '('; searching just that window stays
+       cheap as fields are appended. */
+    const char *open_paren = strchr (statbuf, '(');
+    if (open_paren != NULL) {
+        /* one past the last byte that can hold COMM's closing ')', clamped to
+           the end of the string so a short read cannot run off it */
+        const char *end = open_paren + strnlen (open_paren, FATRACE_COMM_MAX + 1);
+
+        for (const char *p = end - 1; p > open_paren; --p) {
+            if (*p != ')')
+                continue;
+            pid_t parent;
+            unsigned long flags;
+            int fields = sscanf (p + 1, " %*c %d %*d %*d %*d %*d %lu", &parent, &flags);
+            if (fields >= 1) {
+                if (procname != NULL) {
+                    size_t comm_len = MIN ((size_t) (p - open_paren - 1), procname_size - 1);
+                    memcpy (procname, open_paren + 1, comm_len);
+                    procname[comm_len] = '\0';
+                }
+                if (ppid != NULL)
+                    *ppid = parent;
+                if (is_kthread != NULL) {
+                    if (fields == 2)
+                        *is_kthread = (flags & PF_KTHREAD) != 0;
+                    else
+                        warnx ("failed to read the flags field of /proc/%u/stat: %s", pid, statbuf);
+                }
+                return true;
+            }
+            /* an earlier ')' would only yield a PPID that COMM chose */
+            break;
+        }
+    }
+
     /* this *really* should not happen, kernel API change  */
     warnx ("failed to parse /proc/%u/stat, please file a bug: %s", pid, statbuf);
-    return 0;
+    return false;
 }
 
 /* read /proc/PID/exe; "" on failure */
@@ -254,6 +602,20 @@ get_exe (int proc_fd, pid_t pid, char *exe, size_t exe_size) {
         len = 0;
     }
     exe[len] = '\0';
+}
+
+/* Initialize or reinitialize a struct fatrace_event  */
+static void
+event_reset (struct fatrace_event* ev)
+{
+    /* parents[] is the bulk of the struct and only valid up to parents_len.
+       Assert compile-time that parents[] is the last member, and reset by
+       writing 0 to everything but parents[]. */
+    static_assert (alignof (typeof (*ev)) == alignof (typeof (ev->parents[0])),
+                   "fatrace_event and fatrace_event_proc need to share alignment.");
+    static_assert (sizeof (*ev) == offsetof (typeof (*ev), parents) + sizeof (ev->parents),
+                   "parents[] needs to be the last member of struct fatrace_event");
+    memset (ev, 0, offsetof (typeof (*ev), parents));
 }
 
 /**
@@ -271,10 +633,18 @@ process_event (const struct fanotify_event_metadata *data,
 {
     int event_fd = data->fd;
     static char procpath[100];
-    static char procname[TASK_COMM_LEN];
+    static char procname[FATRACE_COMM_MAX];
     static int procname_pid = -1;
+    static bool procname_is_kthread = false;
     bool got_procname = false;
+    bool is_kthread = false;
     pid_t ppid = 0;
+
+    /* stat carries the name, the parent PID and the kernel-thread flag in one
+       read, where comm carries only the name but is cheaper. The flag is only
+       needed where comm_matches() may have to undo a name the kernel cut. */
+    bool need_stat = option_parents ||
+                     (option_comm && strlen (option_comm) > FATRACE_USER_COMM_MAX - 1);
 
     if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
         if (event_fd >= 0)
@@ -282,8 +652,7 @@ process_event (const struct fanotify_event_metadata *data,
         return false;
     }
 
-    /* parents[] is the bulk of the struct and only valid up to parents_len */
-    memset (ev, 0, offsetof (struct fatrace_event, parents));
+    event_reset (ev);
     ev->time = *event_time;
     ev->mask = data->mask;
     ev->proc.pid = data->pid;
@@ -291,12 +660,15 @@ process_event (const struct fanotify_event_metadata *data,
     snprintf (procpath, sizeof (procpath), "/proc/%i", data->pid);
     int proc_fd = open (procpath, O_RDONLY | O_DIRECTORY);
     if (proc_fd >= 0) {
-        if (option_parents)
-            ppid = get_ppid (proc_fd, data->pid);
+        if (need_stat)
+            got_procname = get_proc_stat (proc_fd, data->pid, procname, sizeof (procname),
+                                          option_parents ? &ppid : NULL, &is_kthread);
+        else
+            got_procname = get_procname (proc_fd, data->pid, procname, sizeof (procname));
 
-        if (get_procname (proc_fd, data->pid, procname, sizeof (procname))) {
+        if (got_procname) {
             procname_pid = data->pid;
-            got_procname = true;
+            procname_is_kthread = is_kthread;
         }
 
         /* /proc/PID is owned by the process' user and group */
@@ -323,20 +695,21 @@ process_event (const struct fanotify_event_metadata *data,
     if (!got_procname) {
         if (data->pid == procname_pid) {
             debug ("re-using cached procname value %s for pid %i", procname, procname_pid);
+            is_kthread = procname_is_kthread;
         } else if (procname_pid >= 0) {
             debug ("invalidating previously cached procname %s for pid %i", procname, procname_pid);
             procname_pid = -1;
             procname[0] = '\0';
         }
     }
-    memcpy (ev->proc.comm, procname, sizeof (procname));
 
-    if (option_comm && strcmp (option_comm, procname) != 0 &&
+    if (option_comm && !comm_matches (option_comm, procname, is_kthread) &&
         procname[0] != '\0') {
         if (event_fd >= 0)
             close (event_fd);
         return false;
     }
+    memcpy (ev->proc.comm, procname, sizeof (procname));
 
 #ifdef FAN_REPORT_FID
     if (fid_mode)
@@ -376,15 +749,13 @@ process_event (const struct fanotify_event_metadata *data,
         snprintf (procpath, sizeof (procpath), "/proc/%i", ppid);
         int ppid_dir_fd = open (procpath, O_RDONLY | O_DIRECTORY);
         if (ppid_dir_fd >= 0) {
-            get_procname (ppid_dir_fd, ppid, parent->comm, sizeof (parent->comm));
+            /* one read for both this parent's name and the next one */
+            pid_t next_ppid;
+            get_proc_stat (ppid_dir_fd, ppid, parent->comm, sizeof (parent->comm), &next_ppid, NULL);
             if (option_exe)
                 get_exe (ppid_dir_fd, ppid, parent->exe, sizeof (parent->exe));
-            /* get next parent */
-            if (ppid == 1)
-                ppid = 0;
-            else
-                ppid = get_ppid (ppid_dir_fd, ppid);
             close (ppid_dir_fd);
+            ppid = next_ppid;
         } else {
             warn ("failed to open %s", procpath);
             ppid = 0;
@@ -572,14 +943,21 @@ parse_args (int argc, char** argv)
 
         switch (c) {
             case 'C':
-                option_comm = strdup (optarg);
-                if (!option_comm)
-                    err(EXIT_FAILURE, "memory allocation failed for --command");
-                /* see https://man7.org/linux/man-pages/man5/proc_pid_comm.5.html */
-                if (strlen (option_comm) > TASK_COMM_LEN - 1) {
-                    option_comm[TASK_COMM_LEN - 1] = '\0';
-                    warnx ("--command truncated to %i characters: %s", TASK_COMM_LEN - 1, option_comm);
-                }
+                option_comm = optarg;
+                /* comm_matches() accepts a name the kernel cut, which is a
+                   surprise exactly when the argument is too long to be a
+                   userspace name. Say so rather than cutting the argument,
+                   which would silently ask for something else. */
+                if (strlen (option_comm) > FATRACE_COMM_MAX - 1)
+                    warnx ("--command is longer than the %i characters /proc reports a name in, so no "
+                           "name can equal it; only a userspace process whose name the kernel cut to "
+                           "\"%.*s\" matches",
+                           FATRACE_COMM_MAX - 1, FATRACE_USER_COMM_MAX - 1, option_comm);
+                else if (strlen (option_comm) > FATRACE_USER_COMM_MAX - 1)
+                    warnx ("--command is longer than the %i characters a userspace process is named "
+                           "in, so it also matches any userspace process whose name the kernel cut to "
+                           "\"%.*s\"; a kernel thread, reported under its full name, has to equal it",
+                           FATRACE_USER_COMM_MAX - 1, FATRACE_USER_COMM_MAX - 1, option_comm);
                 break;
 
             case 'c':
@@ -714,8 +1092,16 @@ signal_handler (int signal)
         _exit (EXIT_FAILURE);
 }
 
+#ifdef FATRACE_UNIT_TEST
+/* A unit test has its own main function, so we must rename this one.
+   We can't remove it though, as it would orphan some static functions above. */
+#define FATRACE_MAIN fatrace_main
+#else
+#define FATRACE_MAIN main
+#endif
+
 int
-main (int argc, char** argv)
+FATRACE_MAIN (int argc, char** argv)
 {
     int fan_fd = -1;
     int res;
