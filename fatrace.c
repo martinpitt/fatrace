@@ -482,8 +482,16 @@ get_procname (int proc_fd, pid_t pid, char *procname, size_t procname_size) {
     return true;
 }
 
-/* given an fd to /proc/PID, return the parent PID if it can be determined,
-   otherwise 0. */
+/* proc_task_name() (fs/proc/array.c) renders comm through a 64 byte buffer, for
+   both /proc/PID/comm and the comm field of /proc/PID/stat; TASK_COMM_LEN (16)
+   bounds only what userspace can set. */
+#define STAT_COMM_MAX 64
+
+/* given an fd to /proc/PID, return the parent PID, or 0 if there is none or it
+   could not be read -- the latter warns on stderr. A process has no parent PID
+   when it is pid 1, when it is pid 2 (kthreadd, whose parent is the idle task),
+   or when its parent lives in an ancestor PID namespace, as after
+   "docker exec"; the chain does not always end at pid 1. */
 static pid_t
 get_ppid (int proc_fd, pid_t pid) {
     static char statbuf[4096];
@@ -501,9 +509,29 @@ get_ppid (int proc_fd, pid_t pid) {
     /* buffer is static, and read() does not nul terminate */
     statbuf[MIN(len, sizeof (statbuf) - 1)] = '\0';
 
-    pid_t ret;
-    if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
-        return ret;
+    /* The format is "PID (COMM) STATE PPID ...". COMM is printed unescaped and
+       may contain ')' and spaces, so skipping it with "%*[^)]" stops at the
+       first ')' inside it and lets a process pick the PPID we report for it,
+       e.g. by prctl(PR_SET_NAME, "x) R 1"). Every field after COMM is numeric,
+       so COMM's closing ')' is the last ')' within STAT_COMM_MAX bytes of the
+       only '('; searching just that window stays cheap as fields are appended. */
+    const char *open_paren = strchr (statbuf, '(');
+    if (open_paren != NULL) {
+        /* one past the last byte that can hold COMM's closing ')', clamped to
+           the end of the string so a short read cannot run off it */
+        const char *end = open_paren + strnlen (open_paren, STAT_COMM_MAX + 1);
+
+        for (const char *p = end - 1; p > open_paren; --p) {
+            if (*p != ')')
+                continue;
+            pid_t ret;
+            if (sscanf (p + 1, " %*c %d", &ret) == 1)
+                return ret;
+            /* an earlier ')' would only yield a PPID that COMM chose */
+            break;
+        }
+    }
+
     /* this *really* should not happen, kernel API change  */
     warnx ("failed to parse /proc/%u/stat, please file a bug: %s", pid, statbuf);
     return 0;
