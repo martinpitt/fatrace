@@ -74,7 +74,7 @@ static bool option_exe = false;
 static const char **option_dirs;
 static unsigned int option_dirs_len = 0;
 
-/* --time alarm sets this to 0 */
+/* SIGINT and the --seconds alarm set this to 0 */
 static volatile int running = 1;
 static volatile int signaled = 0;
 
@@ -877,7 +877,7 @@ main (int argc, char** argv)
     if (sigaction (SIGINT, &sa, NULL) < 0)
         err (EXIT_FAILURE, "sigaction");
 
-    /* set up --time alarm */
+    /* set up --seconds alarm */
     if (option_timeout > 0) {
         sa.sa_handler = signal_handler;
         sigemptyset (&sa.sa_mask);
