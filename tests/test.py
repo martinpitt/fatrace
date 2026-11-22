@@ -215,6 +215,24 @@ class FatraceTests(unittest.TestCase):
         # ELOOP symlink operations
         f.assert_json(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
 
+    def test_hardlinks(self):
+        """Report the hard link through which a file got accessed
+
+        This happens with multi-call binaries like Rust coreutils.
+        """
+        orig = self.tmp_path / "orig"
+        orig.write_text("hello")
+        link = self.tmp_path / "link"
+        link.hardlink_to(orig)
+
+        f = FatraceRunner(["--current-mount", "-s", "2"])
+        slow_exe(["head", str(orig)], stdout=subprocess.DEVNULL)
+        slow_exe(["head", str(link)], stdout=subprocess.DEVNULL)
+        f.finish()
+
+        f.assert_json(lambda e: e["comm"] == "head" and "R" in e["types"] and e["path"] == str(orig))
+        f.assert_json(lambda e: e["comm"] == "head" and "R" in e["types"] and e["path"] == str(link))
+
     def test_command(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)
         long_cmd = self.tmp_path / "VeryLongTouchCommand"

@@ -165,11 +165,19 @@ open_fid (const struct fanotify_event_info_fid *fid)
  * get_fid_event_fd:
  *
  * Return an fd for the event's target.
+ *
+ * Events on a non-directory also identify the parent directory and the name through which the file was
+ * accessed. Then write that into @path, as the target fd's path is ambiguous with hard links:
+ * open_by_handle_at() picks an arbitrary one. Otherwise, set @path to "".
  */
 static int
-get_fid_event_fd (const struct fanotify_event_metadata *data)
+get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t path_size)
 {
-    const struct fanotify_event_info_fid *object = NULL;
+    const struct fanotify_event_info_fid *object = NULL, *dir = NULL;
+    const char *name = NULL;
+    int fd;
+
+    path[0] = '\0';
 
     /* the kernel does not guarantee the order of info records */
     for (const char *p = (const char *) data + data->metadata_len; p < (const char *) data + data->event_len; ) {
@@ -180,17 +188,43 @@ get_fid_event_fd (const struct fanotify_event_metadata *data)
             case FAN_EVENT_INFO_TYPE_FID:
                 object = info;
                 break;
+            case FAN_EVENT_INFO_TYPE_DFID_NAME: {
+                const struct file_handle *handle = (const struct file_handle *) info->handle;
+                dir = info;
+                name = (const char *) handle->f_handle + handle->handle_bytes;
+                break;
+            }
             default:
                 warnx ("Ignoring unexpected event info type %i", info->hdr.info_type);
         }
     }
 
+    /* Events on a directory and directory entry events (create, delete, move) only have a DFID_NAME
+     * record; for these, report the directory itself. Unlinked files only have a FID record. */
+    if (!object) {
+        object = dir;
+        dir = NULL;
+    }
     if (!object) {
         warnx ("Received event without file handle, cannot get affected file");
         return -1;
     }
 
-    return open_fid (object);
+    fd = open_fid (object);
+
+    /* directories cannot be hard linked, so their path is unique */
+    if (fd >= 0 && dir) {
+        int dir_fd = open_fid (dir);
+        if (dir_fd >= 0) {
+            get_fd_path (dir_fd, path, path_size);
+            close (dir_fd);
+            size_t len = strlen (path);
+            if (len > 0)
+                snprintf (path + len, path_size - len, "%s%s", path[len - 1] == '/' ? "" : "/", name);
+        }
+    }
+
+    return fd;
 }
 
 /**
@@ -346,7 +380,7 @@ process_event (const struct fanotify_event_metadata *data,
         return false;
     memcpy (ev->proc.comm, procname, sizeof (procname));
 
-    event_fd = get_fid_event_fd (data);
+    event_fd = get_fid_event_fd (data, ev->path, sizeof (ev->path));
     if (event_fd >= 0) {
         struct stat st;
 
@@ -359,7 +393,9 @@ process_event (const struct fanotify_event_metadata *data,
             ev->ino = st.st_ino;
         }
 
-        get_fd_path (event_fd, ev->path, sizeof (ev->path));
+        if (!ev->path[0])
+            get_fd_path (event_fd, ev->path, sizeof (ev->path));
+
         close (event_fd);
     }
 
@@ -714,7 +750,7 @@ main (int argc, char** argv)
     parse_args (argc, argv);
     format_event = option_json ? format_fatrace_event_json : format_fatrace_event_text;
 
-    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID, O_LARGEFILE);
+    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID | FAN_REPORT_DFID_NAME, O_LARGEFILE);
     if (fan_fd < 0) {
         if (errno == EINVAL)
             errx (EXIT_FAILURE, "Cannot initialize fanotify: fatrace requires Linux 5.9 or newer");
