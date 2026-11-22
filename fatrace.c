@@ -185,8 +185,7 @@ add_fsid (int fd, const char* path)
     debug ("%s: mount point %s", path, mount_point);
 }
 
-/* return an fd for open_by_handle_at() on the file system with the given fsid; AT_FDCWD if the file system is
- * unknown; -1 if its mount point is not available any more */
+/* return an fd for open_by_handle_at() on the file system with the given fsid, or -1 if that is not possible */
 static int
 open_mount (const fsid_t *fsid)
 {
@@ -194,8 +193,10 @@ open_mount (const fsid_t *fsid)
     struct stat st;
     int fd;
 
+    /* add_fsid() failed and already warned; decoding the handle relative to another file system would fail or
+     * open an unrelated file */
     if (i < 0)
-        return AT_FDCWD;
+        return -1;
 
     fd = open (fsids[i].mount_point, O_RDONLY | O_DIRECTORY);
     if (fd < 0)
@@ -282,7 +283,7 @@ get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t
 
     /* both records are on the same file system */
     mount_fd = open_mount ((const fsid_t *) &(object ? object : dir)->fsid);
-    if (mount_fd == -1)
+    if (mount_fd < 0)
         return -1;
 
     fd = object ? open_fid (mount_fd, object) : -1;
@@ -299,8 +300,7 @@ get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t
         }
     }
 
-    if (mount_fd >= 0)
-        close (mount_fd);
+    close (mount_fd);
     return fd;
 }
 
