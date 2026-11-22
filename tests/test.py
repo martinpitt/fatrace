@@ -524,6 +524,31 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             retry_unmount(str(mount))
         self.assertEqual(umount.returncode, 0)
 
+    def test_same_fsid(self):
+        """Warn about different file systems with the same ID"""
+
+        if not shutil.which("mkfs.ext4"):
+            self.skipTest("mkfs.ext4 not installed")
+
+        # ext4 derives the file system ID from the UUID, so a copy of an image has the same one
+        image = self.tmp_path / "ext4.img"
+        with image.open("wb") as fd:
+            fd.truncate(8 * 1024 * 1024)
+        exe(["mkfs.ext4", "-q", str(image)])
+        copy = self.tmp_path / "copy.img"
+        shutil.copy(image, copy)
+
+        mounts = [self.tmp_path / "orig", self.tmp_path / "copy"]
+        for img, mount in zip([image, copy], mounts):
+            mount.mkdir()
+            exe(["mount", "-o", "loop", str(img), str(mount)])
+            self.addCleanup(retry_unmount, str(mount))
+
+        with tempfile.TemporaryFile("w+") as stderr:
+            FatraceRunner(["-s", "1"], stderr=stderr).finish()
+            stderr.seek(0)
+            self.assertIn(f"{mounts[1]} has the same file system ID as {mounts[0]}", stderr.read())
+
     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
     @unittest.skipIf(root_is_btrfs, "FANOTIFY does not work on btrfs, https://github.com/martinpitt/fatrace/issues/3")

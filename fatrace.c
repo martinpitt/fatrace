@@ -115,11 +115,7 @@ add_fsid (const char* mount_point)
 {
     struct statfs s;
     struct stat st;
-
-    if (fsids_len == MAX_MOUNTS) {
-        warnx ("Too many mounts, not resolving fd paths for %s", mount_point);
-        return;
-    }
+    ssize_t i;
 
     if (statfs (mount_point, &s) < 0 || stat (mount_point, &st) < 0) {
         warn ("Failed to stat mount point %s", mount_point);
@@ -129,6 +125,22 @@ add_fsid (const char* mount_point)
     /* files mounted over files cannot be used for resolving file handles */
     if (!S_ISDIR (st.st_mode)) {
         debug ("ignore non-directory mount %s", mount_point);
+        return;
+    }
+
+    i = find_fsid (&s.f_fsid);
+    if (i >= 0) {
+        /* e. g. a copy of an ext4 file system image, which has the same UUID; events only carry the fsid, so
+         * file handles get resolved on the first one */
+        if (st.st_dev != fsids[i].mount_dev)
+            warnx ("%s has the same file system ID as %s, its paths may be reported below the latter",
+                   mount_point, fsids[i].mount_point);
+        /* otherwise e. g. bind mounts; keep the first one, as the root dir comes first */
+        return;
+    }
+
+    if (fsids_len == MAX_MOUNTS) {
+        warnx ("Too many mounts, not resolving fd paths for %s", mount_point);
         return;
     }
 
