@@ -3,6 +3,7 @@ import os
 import pwd
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -51,7 +52,7 @@ def retry_unmount(path: str) -> None:
 class FatraceRunner:
     """Run fatrace with the given arguments in the background."""
 
-    def __init__(self, args: list[str], json_output: bool = True):
+    def __init__(self, args: list[str], json_output: bool = True, **popen_kwargs):
         # we want to support multiple parallel FatraceRunners, so create our own private log dir
         self.log_dir = tempfile.TemporaryDirectory()
         self.output_file = os.path.join(self.log_dir.name, "fatrace.log")
@@ -61,7 +62,7 @@ class FatraceRunner:
         argv = [fatrace_bin, "-o", str(self.output_file)]
         if json_output:
             argv.append("--json")
-        self.process = subprocess.Popen(argv + args)
+        self.process = subprocess.Popen(argv + args, **popen_kwargs)
         # wait until fatrace starts
         while not os.path.exists(self.output_file):
             time.sleep(0.1)
@@ -231,6 +232,36 @@ class FatraceTests(unittest.TestCase):
 
         f.assert_json(lambda e: e["comm"] == "head" and "R" in e["types"] and e["path"] == str(orig))
         f.assert_json(lambda e: e["comm"] == "head" and "R" in e["types"] and e["path"] == str(link))
+
+    def test_queue_overflow(self):
+        """Warn about lost events"""
+
+        max_events = int(Path("/proc/sys/fs/fanotify/max_queued_events").read_text())
+        if max_events > 100000:
+            self.skipTest(f"fanotify max_queued_events {max_events} is too large")
+
+        with tempfile.TemporaryFile("w+") as stderr:
+            f = FatraceRunner(["--current-mount", "-s", "30"], stderr=stderr)
+
+            # stop reading events, and fill the kernel queue with at least one event per file
+            f.process.send_signal(signal.SIGSTOP)
+            for i in range(max_events + 100):
+                (self.tmp_path / str(i)).touch()
+            f.process.send_signal(signal.SIGCONT)
+
+            # the overflow notification comes after all queued events
+            for _ in range(50):
+                stderr.seek(0)
+                if "Event queue overflowed" in stderr.read():
+                    break
+                time.sleep(0.2)
+            f.process.send_signal(signal.SIGINT)
+            f.finish()
+
+            stderr.seek(0)
+            self.assertIn("fatrace: Event queue overflowed, some events were lost", stderr.read())
+        # the overflow is not reported as an event without process
+        f.assert_not_json(lambda e: e["pid"] == 0)
 
     def test_command(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)

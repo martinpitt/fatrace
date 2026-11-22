@@ -824,7 +824,10 @@ main (int argc, char** argv)
         while (FAN_EVENT_OK (data, res)) {
             if (data->vers != FANOTIFY_METADATA_VERSION)
                 errx (EXIT_FAILURE, "Mismatch of fanotify metadata version");
-            if (process_event (data, &event_time, &event))
+            /* the kernel queues this once its event queue is full; it has no process or file */
+            if (data->mask & FAN_Q_OVERFLOW)
+                warnx ("Event queue overflowed, some events were lost");
+            else if (process_event (data, &event_time, &event))
                 format_event (stdout, &event, option_timestamp);
             data = FAN_EVENT_NEXT (data, res);
         }
