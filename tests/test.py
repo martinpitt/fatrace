@@ -509,6 +509,21 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             f.assert_not_json(on_path(f"{new_no1}/noJ"))
             f.assert_not_json(on_path(f"{new_no1}/subB/noK"))
 
+    def test_unmount(self):
+        """Watched file systems can be unmounted"""
+
+        # the default mode only watches mounts whose source is a path, which tmpfs ignores
+        mount = self.tmp_path / "mnt"
+        mount.mkdir()
+        exe(["mount", "-t", "tmpfs", "/dev/null", str(mount)])
+
+        f = FatraceRunner(["-s", "2"])
+        umount = subprocess.run(["umount", str(mount)], check=False)
+        f.finish()
+        if umount.returncode != 0:
+            retry_unmount(str(mount))
+        self.assertEqual(umount.returncode, 0)
+
     @unittest.skipIf("container" in os.environ, "Not supported in container environment")
     @unittest.skipIf(os.path.exists("/sysroot/ostree"), "Test does not work on OSTree")
     @unittest.skipIf(root_is_btrfs, "FANOTIFY does not work on btrfs, https://github.com/martinpitt/fatrace/issues/3")

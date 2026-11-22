@@ -82,60 +82,83 @@ static volatile int signaled = 0;
 
 static int mark_mode = FAN_MARK_ADD | FAN_MARK_FILESYSTEM;
 
-/* fsid → mount fd map */
+/* fsid → mount point map, for resolving file handles. Mount points only get opened while handling an event,
+ * so that fatrace does not keep the file systems busy. */
 
 #define MAX_MOUNTS 100
 static struct {
     fsid_t fsid;
-    int mount_fd;
+    char *mount_point;
+    dev_t mount_dev;            /* to notice when mount_point got unmounted or mounted over */
 } fsids[MAX_MOUNTS];
 static size_t fsids_len;
+
+/* return the fsids[] index for an fsid, or -1 if unknown */
+static ssize_t
+find_fsid (const fsid_t *fsid)
+{
+    for (size_t i = 0; i < fsids_len; ++i)
+        if (memcmp (fsid, &fsids[i].fsid, sizeof (fsids[i].fsid)) == 0)
+            return i;
+
+    debug ("fsid not found");
+    return -1;
+}
 
 /**
  * add_fsid:
  *
- * Add fsid → mount fd map entry for a particular mount point
+ * Add fsid → mount point map entry for a particular mount point
  */
 static void
 add_fsid (const char* mount_point)
 {
     struct statfs s;
-    int fd;
+    struct stat st;
 
     if (fsids_len == MAX_MOUNTS) {
         warnx ("Too many mounts, not resolving fd paths for %s", mount_point);
         return;
     }
 
-    fd = open (mount_point, O_RDONLY | O_NOFOLLOW);
-    if (fd < 0) {
-        warn ("Failed to open mount point %s", mount_point);
+    if (statfs (mount_point, &s) < 0 || stat (mount_point, &st) < 0) {
+        warn ("Failed to stat mount point %s", mount_point);
         return;
     }
 
-    if (fstatfs (fd, &s) < 0) {
-        warn ("Failed to stat mount point %s", mount_point);
-        close (fd);
+    /* files mounted over files cannot be used for resolving file handles */
+    if (!S_ISDIR (st.st_mode)) {
+        debug ("ignore non-directory mount %s", mount_point);
         return;
     }
 
     memcpy (&fsids[fsids_len].fsid, &s.f_fsid, sizeof (s.f_fsid));
-    fsids[fsids_len++].mount_fd = fd;
-    debug ("mount %s fd %i", mount_point, fd);
+    fsids[fsids_len].mount_point = strdup (mount_point);
+    if (!fsids[fsids_len].mount_point)
+        err (EXIT_FAILURE, "strdup");
+    fsids[fsids_len++].mount_dev = st.st_dev;
 }
 
+/* return an fd for open_by_handle_at() on the file system with the given fsid; AT_FDCWD if the file system is
+ * unknown; -1 if its mount point is not available any more */
 static int
-get_mount_id (const fsid_t *fsid)
+open_mount (const fsid_t *fsid)
 {
-    for (size_t i = 0; i < fsids_len; ++i) {
-        if (memcmp (fsid, &fsids[i].fsid, sizeof (fsids[i].fsid)) == 0) {
-            debug ("mapped fsid to fd %i", fsids[i].mount_fd);
-            return fsids[i].mount_fd;
-        }
-    }
+    ssize_t i = find_fsid (fsid);
+    struct stat st;
+    int fd;
 
-    debug ("fsid not found, default to AT_FDCWD\n");
-    return AT_FDCWD;
+    if (i < 0)
+        return AT_FDCWD;
+
+    fd = open (fsids[i].mount_point, O_RDONLY | O_DIRECTORY);
+    if (fd < 0)
+        return -1;
+    if (fstat (fd, &st) < 0 || st.st_dev != fsids[i].mount_dev) {
+        close (fd);
+        return -1;
+    }
+    return fd;
 }
 
 /* readlink() an fd's path; "" on failure */
@@ -150,10 +173,10 @@ get_fd_path (int fd, char *path, size_t path_size)
 
 /* return an fd for the file handle of a fanotify info record */
 static int
-open_fid (const struct fanotify_event_info_fid *fid)
+open_fid (int mount_fd, const struct fanotify_event_info_fid *fid)
 {
-    int fd = open_by_handle_at (get_mount_id ((const fsid_t *) &fid->fsid),
-                                (struct file_handle *) fid->handle, O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_PATH);
+    int fd = open_by_handle_at (mount_fd, (struct file_handle *) fid->handle,
+                                O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_PATH);
     /* ignore ESTALE for deleted fds between the notification and handling it */
     if (fd < 0 && errno != ESTALE)
         warn ("open_by_handle_at");
@@ -176,7 +199,7 @@ get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t
 {
     const struct fanotify_event_info_fid *object = NULL, *dir = NULL;
     const char *name = NULL;
-    int fd;
+    int mount_fd, fd;
 
     path[0] = '\0';
 
@@ -211,11 +234,16 @@ get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t
         return -1;
     }
 
-    fd = object ? open_fid (object) : -1;
+    /* both records are on the same file system */
+    mount_fd = open_mount ((const fsid_t *) &(object ? object : dir)->fsid);
+    if (mount_fd == -1)
+        return -1;
+
+    fd = object ? open_fid (mount_fd, object) : -1;
 
     /* directories cannot be hard linked, so their path is unique */
     if (dir) {
-        int dir_fd = open_fid (dir);
+        int dir_fd = open_fid (mount_fd, dir);
         if (dir_fd >= 0) {
             get_fd_path (dir_fd, path, path_size);
             close (dir_fd);
@@ -225,6 +253,8 @@ get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t
         }
     }
 
+    if (mount_fd >= 0)
+        close (mount_fd);
     return fd;
 }
 
