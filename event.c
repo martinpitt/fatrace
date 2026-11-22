@@ -162,12 +162,12 @@ format_fatrace_event_text (FILE *out, const struct fatrace_event *ev, enum fatra
         fprintf (out, " [%u:%u]", ev->uid, ev->gid);
     fprintf (out, ": %-3s ", mask2str (ev->mask));
 
-    if (!ev->fd_valid)
-        fputs ("(deleted)", out);
-    else if (ev->path[0])
+    if (ev->path[0])
         fputs (ev->path, out);
     else if (ev->have_stat)
         fprintf (out, "device %u:%u inode %llu", major (ev->dev), minor (ev->dev), (unsigned long long) ev->ino);
+    else
+        fputs ("(deleted)", out);
 
     if (ev->proc.exe[0])
         fprintf (out, " exe=%s", ev->proc.exe);

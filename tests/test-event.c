@@ -156,10 +156,7 @@ event_init (pid_t pid, const char *comm, uint64_t mask, const char *path)
     ev.proc.pid = pid;
     strcpy (ev.proc.comm, comm);
     ev.mask = mask;
-    if (path) {
-        ev.fd_valid = true;
-        strcpy (ev.path, path);
-    }
+    strcpy (ev.path, path);
 }
 
 static void
@@ -217,8 +214,8 @@ test_format_event (void)
     ASSERT_STREQ (text (), "unknown(1234): O   /tmp/x\n");
     ASSERT_STREQ (json (), "{\"pid\":1234,\"types\":\"O\",\"path\":\"/tmp/x\"}\n");
 
-    /* file vanished before it could be looked at */
-    event_init (1234, "rm", FAN_CLOSE_NOWRITE, NULL);
+    /* file vanished before it could be looked at: neither path nor device/inode known */
+    event_init (1234, "rm", FAN_CLOSE_NOWRITE, "");
     ASSERT_STREQ (text (), "rm(1234): C   (deleted)\n");
     ASSERT_STREQ (json (), "{\"comm\":\"rm\",\"pid\":1234,\"types\":\"C\"}\n");
 
@@ -236,11 +233,6 @@ test_format_event (void)
     ASSERT_STREQ (text (), "cat(1234): R   /tmp/x\n");
     ASSERT_STREQ (json (),
                   "{\"comm\":\"cat\",\"pid\":1234,\"types\":\"R\",\"device\":{\"major\":8,\"minor\":1},\"inode\":42,\"path\":\"/tmp/x\"}\n");
-
-    /* neither path nor device/inode known */
-    event_init (1234, "cat", FAN_ACCESS, "");
-    ASSERT_STREQ (text (), "cat(1234): R   \n");
-    ASSERT_STREQ (json (), "{\"comm\":\"cat\",\"pid\":1234,\"types\":\"R\"}\n");
 
     /* no known event type */
     event_init (1234, "touch", 0, "/tmp/x");

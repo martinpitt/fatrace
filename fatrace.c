@@ -384,7 +384,6 @@ process_event (const struct fanotify_event_metadata *data,
     if (event_fd >= 0) {
         struct stat st;
 
-        ev->fd_valid = true;
         if (fstat (event_fd, &st) < 0) {
             warn ("stat");
         } else {

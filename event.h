@@ -57,8 +57,6 @@ struct fatrace_event {
     bool have_ids;
     uid_t uid;
     gid_t gid;
-    bool fd_valid;              /* false if the file vanished before it could be looked at;
-                                   then path is "" and have_stat is false */
     char path[PATH_MAX];        /* "" if unknown */
     bool have_stat;
     dev_t dev;
