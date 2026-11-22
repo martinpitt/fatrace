@@ -136,7 +136,7 @@ class FatraceTests(unittest.TestCase):
         f.finish()
         assert f.log_content
         self.assertRegex(f.log_content,
-                         re.compile(rf"^touch\(\d+\): C?W?O\s+{re.escape(str(test_file))}$", re.MULTILINE))
+                         re.compile(rf"^touch\(\d+\): C?W?O\+?\s+{re.escape(str(test_file))}$", re.MULTILINE))
 
     def test_currentmount(self):
         f = FatraceRunner(["--current-mount", "-s", "2"])
@@ -174,7 +174,6 @@ class FatraceTests(unittest.TestCase):
 
         f.finish()
 
-        cwd = str(self.tmp_path)
         test_file_str = str(test_file)
 
         # file creation
@@ -198,22 +197,22 @@ class FatraceTests(unittest.TestCase):
         # file reading
         f.assert_json(lambda e: e["comm"] == "head" and e["path"] == test_file_str and "R" in e["types"])
 
-        # file deletion
-        f.assert_json(lambda e: e["comm"] == "rm" and e["path"] == cwd and e["types"] == "D")
+        # directory entry events report the entry, including the device/inode of created ones
+        f.assert_json(lambda e: e["comm"] == "touch" and e["path"] == test_file_str and "+" in e["types"] and
+                      e["inode"] == test_file_stat.st_ino)
+        f.assert_json(lambda e: e["comm"] == "mkdir" and e["path"] == str(dest_dir) and e["types"] == "+")
+        f.assert_json(lambda e: e["comm"] == "rm" and e["path"] == test_file_str and e["types"] == "D")
 
-        # directory creation
-        f.assert_json(lambda e: e["comm"] == "touch" and e["path"] == cwd and e["types"] == "+")
-        f.assert_json(lambda e: e["comm"] == "mkdir" and e["path"] == cwd and e["types"] == "+")
-
-        # file renaming (can be one or two events)
-        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and ">" in e["types"])
+        # file renaming
+        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == test_file_str and e["types"] == "<")
+        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == str(test_file_2) and e["types"] == ">")
 
         # file moving between directories
-        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == cwd and e["types"] == "<")
-        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == str(dest_dir) and e["types"] == ">")
+        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == str(test_file_2) and e["types"] == "<")
+        f.assert_json(lambda e: e["comm"] == "mv" and e["path"] == str(dest_file) and e["types"] == ">")
 
         # ELOOP symlink operations
-        f.assert_json(lambda e: e["comm"] == "ln" and e["path"] == cwd and e["types"] == "+")
+        f.assert_json(lambda e: e["comm"] == "ln" and e["path"] == str(link_file) and e["types"] == "+")
 
     def test_hardlinks(self):
         """Report the hard link through which a file got accessed
@@ -297,12 +296,11 @@ class FatraceTests(unittest.TestCase):
         slow_exe(["touch", str(subvol_file)])
 
         f.finish()
-        mount_str = str(mount_dir)
 
         f.assert_json(lambda e: e["comm"] == "head" and "R" in e["types"] and e["path"] == str(world_file))
-        f.assert_json(lambda e: e["comm"] == "touch" and e["types"] == "+" and e["path"] == mount_str)
+        f.assert_json(lambda e: e["comm"] == "touch" and "+" in e["types"] and e["path"] == str(test_file))
         f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(test_file))
-        f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == mount_str)
+        f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == str(test_file))
         f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(subvol_file))
 
     def test_exe_parents(self):
@@ -427,8 +425,8 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         slow_exe(["touch", f"{new_no1}/noJ"])
         slow_exe(["touch", f"{new_no1}/subB/noK"])
 
-        def mkdir_in(path: str) -> Callable[[dict], bool]:
-            return lambda e: e["comm"] == "mkdir" and e["types"] == "+" and e["path"] == path
+        def entry_event(types: str, path: str) -> Callable[[dict], bool]:
+            return lambda e: e["types"] == types and e["path"] == path
 
         def touched(path: str) -> Callable[[dict], bool]:
             return lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == path
@@ -441,13 +439,15 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         for f in (f_opts, f_args):
             f.finish()
 
-            f.assert_json    (mkdir_in(yes1))
+            f.assert_json    (entry_event("+", f"{yes1}/subA"))
             f.assert_not_json(on_path(no1))
             f.assert_json    (touched(f"{yes1}/yesC"))
             f.assert_not_json(on_path(f"{yes1}/subA/noD"))
             f.assert_json    (touched(f"{yes2}/yesE"))
             f.assert_not_json(on_path(f"{no1}/noF"))
             f.assert_not_json(on_path(f"{no1}/subB/noG"))
+            f.assert_json    (entry_event(">", new_yes1))
+            f.assert_json    (entry_event(">", new_no1))
             f.assert_json    (touched(f"{new_yes1}/yesH"))
             f.assert_not_json(on_path(f"{new_yes1}/subA/noI"))
             f.assert_not_json(on_path(f"{new_no1}/noJ"))
@@ -474,5 +474,5 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
         f.assert_json(lambda e: "R" in e["types"] and e["path"] == head_binary)
         f.assert_json(lambda e: "R" in e["types"] and e["path"] == "/etc/passwd")
         f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(test_file))
-        f.assert_json(lambda e: e["comm"] == "touch" and e["types"] == "+" and e["path"] == "/tmp")
-        f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == "/tmp")
+        f.assert_json(lambda e: e["comm"] == "touch" and "+" in e["types"] and e["path"] == str(test_file))
+        f.assert_json(lambda e: e["comm"] == "rm" and e["types"] == "D" and e["path"] == str(test_file))

@@ -164,11 +164,12 @@ open_fid (const struct fanotify_event_info_fid *fid)
 /**
  * get_fid_event_fd:
  *
- * Return an fd for the event's target.
+ * Return an fd for the event's target, or -1 if it cannot be opened.
  *
- * Events on a non-directory also identify the parent directory and the name through which the file was
- * accessed. Then write that into @path, as the target fd's path is ambiguous with hard links:
- * open_by_handle_at() picks an arbitrary one. Otherwise, set @path to "".
+ * Events on a non-directory and directory entry events (create, delete, move) also identify the parent
+ * directory and the name of the target. Then write that into @path: the target fd's path is ambiguous with
+ * hard links, as open_by_handle_at() picks an arbitrary one, and the target may have vanished already.
+ * Otherwise, set @path to "".
  */
 static int
 get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t path_size)
@@ -199,21 +200,21 @@ get_fid_event_fd (const struct fanotify_event_metadata *data, char *path, size_t
         }
     }
 
-    /* Events on a directory and directory entry events (create, delete, move) only have a DFID_NAME
-     * record; for these, report the directory itself. Unlinked files only have a FID record. */
-    if (!object) {
+    /* Events on a directory itself only have a DFID_NAME record with the name "."; report the directory.
+     * Unlinked files only have a FID record. */
+    if (!object && dir && strcmp (name, ".") == 0) {
         object = dir;
         dir = NULL;
     }
-    if (!object) {
+    if (!object && !dir) {
         warnx ("Received event without file handle, cannot get affected file");
         return -1;
     }
 
-    fd = open_fid (object);
+    fd = object ? open_fid (object) : -1;
 
     /* directories cannot be hard linked, so their path is unique */
-    if (fd >= 0 && dir) {
+    if (dir) {
         int dir_fd = open_fid (dir);
         if (dir_fd >= 0) {
             get_fd_path (dir_fd, path, path_size);
@@ -749,10 +750,11 @@ main (int argc, char** argv)
     parse_args (argc, argv);
     format_event = option_json ? format_fatrace_event_json : format_fatrace_event_text;
 
-    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID | FAN_REPORT_DFID_NAME, O_LARGEFILE);
+    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_DFID_NAME_TARGET, O_LARGEFILE);
     if (fan_fd < 0) {
         if (errno == EINVAL)
-            errx (EXIT_FAILURE, "Cannot initialize fanotify: fatrace requires Linux 5.9 or newer");
+            errx (EXIT_FAILURE,
+                  "Cannot initialize fanotify: fatrace requires Linux 5.17, 5.15.154, 5.10.220, or newer");
         err (EXIT_FAILURE, "Cannot initialize fanotify");
     }
 

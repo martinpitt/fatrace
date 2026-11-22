@@ -2,7 +2,7 @@
 
 `fatrace` reports file access events from all running processes. Its main purpose is to find processes which keep waking up the disk unnecessarily and thus prevent some power saving.
 
-It requires Linux 5.9 or newer.
+It requires Linux 5.17 or newer, or a stable kernel since 5.15.154 or 5.10.220.
 
 ## Testing
 

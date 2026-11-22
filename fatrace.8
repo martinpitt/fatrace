@@ -61,11 +61,12 @@ UID and GID, if you specify the \fB\-\-user\fR option. It is formatted as
 "[uid:gid]".
 
 .IP \(bu 2
-Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
-directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
-or \fB>\fR (moved to).
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Directory entry
+events are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from), or \fB>\fR
+(moved to); these refer to the created, deleted, or moved entry, so renaming a
+file shows a \fB<\fR event with the old and a \fB>\fR event with the new path.
 Combinations are possible, such as \fBCW\fR for closing a written file, or
-\fB<>\fR for renaming a file within the same directory.
+\fBCWO+\fR for creating and writing a new file.
 
 .IP \(bu 2
 Affected file. In some cases the path and name cannot be determined, e. g.
@@ -119,11 +120,12 @@ GID, if you specify the \fB\-\-user\fR option.
 
 .TP
 .B types
-Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Events on
-directories are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from),
-or \fB>\fR (moved to).
+Event type: \fBO\fRpen, \fBR\fRead, \fBW\fRrite, \fBC\fRlose. Directory entry
+events are \fB+\fR (create), \fBD\fRelete, \fB<\fR (moved from), or \fB>\fR
+(moved to); these refer to the created, deleted, or moved entry, so renaming a
+file shows a \fB<\fR event with the old and a \fB>\fR event with the new path.
 Combinations are possible, such as \fBCW\fR for closing a written file, or
-\fB<>\fR for renaming a file within the same directory.
+\fBCWO+\fR for creating and writing a new file.
 
 .TP
 .B device
