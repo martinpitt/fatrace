@@ -169,14 +169,28 @@ open_fid (const struct fanotify_event_info_fid *fid)
 static int
 get_fid_event_fd (const struct fanotify_event_metadata *data)
 {
-    const struct fanotify_event_info_fid *fid = (const struct fanotify_event_info_fid *) (data + 1);
+    const struct fanotify_event_info_fid *object = NULL;
 
-    if (fid->hdr.info_type != FAN_EVENT_INFO_TYPE_FID) {
-        warnx ("Received unexpected event info type %i, cannot get affected file", fid->hdr.info_type);
+    /* the kernel does not guarantee the order of info records */
+    for (const char *p = (const char *) data + data->metadata_len; p < (const char *) data + data->event_len; ) {
+        const struct fanotify_event_info_fid *info = (const struct fanotify_event_info_fid *) p;
+        p += info->hdr.len;
+
+        switch (info->hdr.info_type) {
+            case FAN_EVENT_INFO_TYPE_FID:
+                object = info;
+                break;
+            default:
+                warnx ("Ignoring unexpected event info type %i", info->hdr.info_type);
+        }
+    }
+
+    if (!object) {
+        warnx ("Received event without file handle, cannot get affected file");
         return -1;
     }
 
-    return open_fid (fid);
+    return open_fid (object);
 }
 
 /**
