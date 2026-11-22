@@ -70,7 +70,6 @@ test_mask2str (void)
     /* fixed output order regardless of bit order */
     ASSERT_STREQ (mask2str (FAN_OPEN | FAN_CLOSE_NOWRITE | FAN_ACCESS), "RCO");
     ASSERT_STREQ (mask2str (FAN_OPEN | FAN_CLOSE_WRITE), "CWO");
-#ifdef FAN_REPORT_FID
     ASSERT_STREQ (mask2str (FAN_CREATE), "+");
     ASSERT_STREQ (mask2str (FAN_DELETE), "D");
     ASSERT_STREQ (mask2str (FAN_MOVED_FROM), "<");
@@ -78,7 +77,6 @@ test_mask2str (void)
     ASSERT_STREQ (mask2str (FAN_MOVE), "<>");
     ASSERT_STREQ (mask2str (FAN_ACCESS | FAN_CLOSE | FAN_MODIFY | FAN_OPEN |
                             FAN_CREATE | FAN_DELETE | FAN_MOVE), "RCWO+D<>");
-#endif
     /* unrelated bits are ignored */
     ASSERT_STREQ (mask2str (FAN_ONDIR | FAN_EVENT_ON_CHILD), "");
 }

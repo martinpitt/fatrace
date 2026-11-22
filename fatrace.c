@@ -80,16 +80,7 @@ static unsigned int option_dirs_len = 0;
 static volatile int running = 1;
 static volatile int signaled = 0;
 
-/* FAN_MARK_FILESYSTEM got introduced in Linux 4.20; do_mark falls back to _MOUNT */
-#ifdef FAN_MARK_FILESYSTEM
 static int mark_mode = FAN_MARK_ADD | FAN_MARK_FILESYSTEM;
-#else
-static int mark_mode = FAN_MARK_ADD | FAN_MARK_MOUNT;
-#endif
-
-/* FAN_REPORT_FID mode got introduced in Linux 5.1 */
-#ifdef FAN_REPORT_FID
-static int fid_mode;
 
 /* fsid → mount fd map */
 
@@ -150,7 +141,7 @@ get_mount_id (const fsid_t *fsid)
 /**
  * get_fid_event_fd:
  *
- * In FAN_REPORT_FID mode, return an fd for the event's target.
+ * Return an fd for the event's target.
  */
 static int
 get_fid_event_fd (const struct fanotify_event_metadata *data)
@@ -172,12 +163,6 @@ get_fid_event_fd (const struct fanotify_event_metadata *data)
 
     return fd;
 }
-
-#else /* defined(FAN_REPORT_FID) */
-
-#define add_fsid(...)
-
-#endif /* defined(FAN_REPORT_FID) */
 
 /**
  * show_pid:
@@ -269,18 +254,15 @@ process_event (const struct fanotify_event_metadata *data,
                const struct timeval *event_time,
                struct fatrace_event *ev)
 {
-    int event_fd = data->fd;
+    int event_fd;
     static char procpath[100];
     static char procname[TASK_COMM_LEN];
     static int procname_pid = -1;
     bool got_procname = false;
     pid_t ppid = 0;
 
-    if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid)) {
-        if (event_fd >= 0)
-            close (event_fd);
+    if ((data->mask & option_filter_mask) == 0 || !show_pid (data->pid))
         return false;
-    }
 
     /* parents[] is the bulk of the struct and only valid up to parents_len */
     memset (ev, 0, offsetof (struct fatrace_event, parents));
@@ -331,18 +313,11 @@ process_event (const struct fanotify_event_metadata *data,
     }
 
     if (option_comm && strcmp (option_comm, procname) != 0 &&
-        procname[0] != '\0') {
-        if (event_fd >= 0)
-            close (event_fd);
+        procname[0] != '\0')
         return false;
-    }
     memcpy (ev->proc.comm, procname, sizeof (procname));
 
-#ifdef FAN_REPORT_FID
-    if (fid_mode)
-        event_fd = get_fid_event_fd (data);
-#endif
-
+    event_fd = get_fid_event_fd (data);
     if (event_fd >= 0) {
         struct stat st;
 
@@ -398,26 +373,10 @@ static void
 do_mark (int fan_fd, const char *dir, bool fatal)
 {
     int res;
-    uint64_t mask = FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD;
-
-#ifdef FAN_REPORT_FID
-    if (fid_mode)
-        mask |= FAN_CREATE | FAN_DELETE | FAN_MOVE;
-#endif
+    uint64_t mask = FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD |
+                    FAN_CREATE | FAN_DELETE | FAN_MOVE;
 
     res = fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir);
-
-#ifdef FAN_MARK_FILESYSTEM
-    /* fallback for Linux < 4.20 */
-    if (res < 0 && errno == EINVAL && mark_mode & FAN_MARK_FILESYSTEM)
-    {
-        debug ("FAN_MARK_FILESYSTEM not supported; falling back to FAN_MARK_MOUNT");
-        mark_mode = FAN_MARK_ADD | FAN_MARK_MOUNT;
-        do_mark (fan_fd, dir, fatal);
-        return;
-    }
-#endif
-
     if (res < 0)
     {
         if (fatal)
@@ -615,7 +574,6 @@ parse_args (int argc, char** argv)
                         case 'O':
                             option_filter_mask |= FAN_OPEN;
                             break;
-#ifdef FAN_REPORT_FID
                         case '+':
                             option_filter_mask |= FAN_CREATE;
                             break;
@@ -628,7 +586,6 @@ parse_args (int argc, char** argv)
                         case '>':
                             option_filter_mask |= FAN_MOVED_TO;
                             break;
-#endif
                         default:
                             errx (EXIT_FAILURE, "Error: Unknown --filter type '%c'", optarg[j]);
                     }
@@ -717,7 +674,7 @@ signal_handler (int signal)
 int
 main (int argc, char** argv)
 {
-    int fan_fd = -1;
+    int fan_fd;
     int res;
     void *buffer;
     struct fanotify_event_metadata *data;
@@ -732,22 +689,14 @@ main (int argc, char** argv)
     parse_args (argc, argv);
     format_event = option_json ? format_fatrace_event_json : format_fatrace_event_text;
 
-#ifdef FAN_REPORT_FID
     fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID, O_LARGEFILE);
-    if (fan_fd >= 0)
-        fid_mode = 1;
-
-    if (fan_fd < 0 && errno == EINVAL)
-        debug ("FAN_REPORT_FID not available");
-#endif
-    if (fan_fd < 0)
-        fan_fd = fanotify_init (0, O_LARGEFILE);
-
     if (fan_fd < 0) {
         int e = errno;
         perror ("Cannot initialize fanotify");
         if (e == EPERM)
             fputs ("You need to run this program as root.\n", stderr);
+        else if (e == EINVAL)
+            fputs ("fatrace requires Linux 5.9 or newer.\n", stderr);
         exit (EXIT_FAILURE);
     }
 

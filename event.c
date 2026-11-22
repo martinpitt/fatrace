@@ -48,7 +48,6 @@ mask2str (uint64_t mask)
         buffer[offset++] = 'W';
     if (mask & FAN_OPEN)
         buffer[offset++] = 'O';
-#ifdef FAN_REPORT_FID
     if (mask & FAN_CREATE)
         buffer[offset++] = '+';
     if (mask & FAN_DELETE)
@@ -57,7 +56,6 @@ mask2str (uint64_t mask)
         buffer[offset++] = '<';
     if (mask & FAN_MOVED_TO)
         buffer[offset++] = '>';
-#endif
     buffer[offset] = '\0';
 
     return buffer;
