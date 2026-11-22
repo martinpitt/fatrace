@@ -375,8 +375,10 @@ get_ppid (int proc_fd, pid_t pid) {
     /* buffer is static, and read() does not nul terminate */
     statbuf[MIN(len, sizeof (statbuf) - 1)] = '\0';
 
+    /* "PID (COMM) STATE PPID ..."; COMM can contain anything, including ") " or nothing */
+    const char *comm_end = strrchr (statbuf, ')');
     pid_t ret;
-    if (sscanf(statbuf, "%*d (%*[^)]) %*c %d", &ret) == 1)
+    if (comm_end && sscanf (comm_end + 1, " %*c %d", &ret) == 1)
         return ret;
     /* this *really* should not happen, kernel API change  */
     warnx ("failed to parse /proc/%u/stat, please file a bug: %s", pid, statbuf);

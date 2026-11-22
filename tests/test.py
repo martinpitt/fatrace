@@ -396,6 +396,21 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             e["parents"][-1] == {"pid": 1, "comm": init_comm, "exe": str(init_exe)}
         ))
 
+    def test_parents_odd_name(self):
+        """Process names can contain anything, including the field separators of /proc/PID/stat"""
+
+        name = "a) R 1"
+        touch = self.tmp_path / name
+        exe(["cp", str(TESTDIR / "simple-touch"), str(touch)])
+        test_file = self.tmp_path / "test.txt"
+
+        f = FatraceRunner(["--current-mount", "--parents", "-s", "2"])
+        slow_exe([str(touch), str(test_file)])
+        f.finish()
+
+        f.assert_json(lambda e: e["comm"] == name and e["path"] == str(test_file) and
+                      e["parents"][0]["pid"] == os.getpid())
+
     def test_unprivileged(self):
         """Refuse to run without privileges"""
 
