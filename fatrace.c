@@ -88,6 +88,7 @@ static int mark_mode = FAN_MARK_ADD | FAN_MARK_FILESYSTEM;
 #define MAX_MOUNTS 100
 static struct {
     fsid_t fsid;
+    dev_t dev;                  /* of the watched path, to notice different file systems with the same fsid */
     char *mount_point;
     dev_t mount_dev;            /* to notice when mount_point got unmounted or mounted over */
 } fsids[MAX_MOUNTS];
@@ -105,26 +106,52 @@ find_fsid (const fsid_t *fsid)
     return -1;
 }
 
+/* return the mount point of an open file with the given absolute and canonical path, or NULL on failure */
+static char *
+get_mount_point (int fd, const char *path)
+{
+    struct statx stx;
+    char parent[PATH_MAX];
+    char *mount_point;
+    uint64_t mnt_id;
+
+    if (statx (fd, "", AT_EMPTY_PATH, STATX_MNT_ID, &stx) < 0)
+        return NULL;
+    mnt_id = stx.stx_mnt_id;
+
+    mount_point = strdup (path);
+    if (!mount_point)
+        err (EXIT_FAILURE, "strdup");
+
+    /* walk up until the parent is on a different mount */
+    while (strcmp (mount_point, "/") != 0) {
+        strcpy (parent, mount_point);
+        char *slash = strrchr (parent, '/');
+        slash[slash == parent ? 1 : 0] = '\0';
+        if (statx (AT_FDCWD, parent, AT_SYMLINK_NOFOLLOW, STATX_MNT_ID, &stx) < 0 || stx.stx_mnt_id != mnt_id)
+            break;
+        strcpy (mount_point, parent);
+    }
+
+    return mount_point;
+}
+
 /**
  * add_fsid:
  *
- * Add fsid → mount point map entry for a particular mount point
+ * Add fsid → mount point map entry for the file system of a watched directory, unless it is already known.
+ * @path must be absolute and canonical.
  */
 static void
-add_fsid (const char* mount_point)
+add_fsid (int fd, const char* path)
 {
     struct statfs s;
-    struct stat st;
+    struct stat st, mount_st;
+    char *mount_point;
     ssize_t i;
 
-    if (statfs (mount_point, &s) < 0 || stat (mount_point, &st) < 0) {
-        warn ("Failed to stat mount point %s", mount_point);
-        return;
-    }
-
-    /* files mounted over files cannot be used for resolving file handles */
-    if (!S_ISDIR (st.st_mode)) {
-        debug ("ignore non-directory mount %s", mount_point);
+    if (fstatfs (fd, &s) < 0 || fstat (fd, &st) < 0) {
+        warn ("Failed to stat %s, not resolving its paths", path);
         return;
     }
 
@@ -132,23 +159,30 @@ add_fsid (const char* mount_point)
     if (i >= 0) {
         /* e. g. a copy of an ext4 file system image, which has the same UUID; events only carry the fsid, so
          * file handles get resolved on the first one */
-        if (st.st_dev != fsids[i].mount_dev)
+        if (st.st_dev != fsids[i].dev)
             warnx ("%s has the same file system ID as %s, its paths may be reported below the latter",
-                   mount_point, fsids[i].mount_point);
-        /* otherwise e. g. bind mounts; keep the first one, as the root dir comes first */
+                   path, fsids[i].mount_point);
+        /* otherwise e. g. bind mounts; keep the first one, as in the default mode the root dir comes first */
         return;
     }
 
     if (fsids_len == MAX_MOUNTS) {
-        warnx ("Too many mounts, not resolving fd paths for %s", mount_point);
+        warnx ("Too many mounts, not resolving fd paths for %s", path);
+        return;
+    }
+
+    mount_point = get_mount_point (fd, path);
+    if (!mount_point || stat (mount_point, &mount_st) < 0) {
+        warn ("Failed to find mount point of %s, not resolving its paths", path);
+        free (mount_point);
         return;
     }
 
     memcpy (&fsids[fsids_len].fsid, &s.f_fsid, sizeof (s.f_fsid));
-    fsids[fsids_len].mount_point = strdup (mount_point);
-    if (!fsids[fsids_len].mount_point)
-        err (EXIT_FAILURE, "strdup");
-    fsids[fsids_len++].mount_dev = st.st_dev;
+    fsids[fsids_len].dev = st.st_dev;
+    fsids[fsids_len].mount_point = mount_point;
+    fsids[fsids_len++].mount_dev = mount_st.st_dev;
+    debug ("%s: mount point %s", path, mount_point);
 }
 
 /* return an fd for open_by_handle_at() on the file system with the given fsid; AT_FDCWD if the file system is
@@ -472,18 +506,27 @@ process_event (const struct fanotify_event_metadata *data,
     return true;
 }
 
-/* add a watch for a directory or its mount, depending on mark_mode; return whether it succeeded */
+/* add a watch for a directory or its mount, depending on mark_mode, and register its file system for
+ * resolving paths; @dir must be absolute and canonical; return whether adding the watch succeeded */
 static bool
 do_mark (int fan_fd, const char *dir)
 {
     uint64_t mask = FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD |
                     FAN_CREATE | FAN_DELETE | FAN_MOVE;
+    bool success = false;
 
-    if (fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir) < 0) {
+    /* look up the path only once, so that the watch and the registration are on the same file system */
+    int fd = open (dir, O_RDONLY | O_DIRECTORY);
+    if (fd >= 0 && fanotify_mark (fan_fd, mark_mode, mask, fd, NULL) == 0) {
+        add_fsid (fd, dir);
+        success = true;
+    } else {
         warn ("Failed to add watch for %s", dir);
-        return false;
     }
-    return true;
+
+    if (fd >= 0)
+        close (fd);
+    return success;
 }
 
 /**
@@ -523,14 +566,18 @@ setup_fanotify (int fan_fd)
 
     FILE* mounts;
     struct mntent* mount;
+    struct stat st;
 
-    if (option_current_mount)
-        return do_mark (fan_fd, ".");
+    if (option_current_mount) {
+        char cwd[PATH_MAX];
+        if (!getcwd (cwd, sizeof (cwd)))
+            err (EXIT_FAILURE, "getcwd");
+        return do_mark (fan_fd, cwd);
+    }
 
     /* iterate over all mounts; explicitly start with the root dir, to get
      * the shortest possible paths on fsid resolution on e. g. OSTree */
     watched = do_mark (fan_fd, "/");
-    add_fsid ("/");
 
     mounts = setmntent ("/proc/self/mounts", "r");
     if (mounts == NULL)
@@ -553,9 +600,15 @@ setup_fanotify (int fan_fd)
         if (strcmp (mount->mnt_dir, "/") == 0)
             continue;
 
+        /* files mounted over files: their file system usually is watched through another mount, and opening
+         * them could block (FIFOs) or have side effects (devices) */
+        if (stat (mount->mnt_dir, &st) < 0 || !S_ISDIR (st.st_mode)) {
+            debug ("ignore non-directory mount %s", mount->mnt_dir);
+            continue;
+        }
+
         debug ("add watch for %s mount %s", mount->mnt_type, mount->mnt_dir);
         watched |= do_mark (fan_fd, mount->mnt_dir);
-        add_fsid (mount->mnt_dir);
     }
 
     endmntent (mounts);

@@ -509,6 +509,20 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             f.assert_not_json(on_path(f"{new_no1}/noJ"))
             f.assert_not_json(on_path(f"{new_no1}/subB/noK"))
 
+    def test_dir_other_filesystem(self):
+        """--dir on a different file system than the current directory"""
+
+        other = self.tmp_path / "other"
+        other.mkdir()
+        exe(["mount", "-t", "tmpfs", "tmpfs", str(other)])
+        self.addCleanup(retry_unmount, str(other))
+
+        f = FatraceRunner(["-s", "2", "--dir", str(other)])
+        slow_exe(["touch", str(other / "file")])
+        f.finish()
+
+        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(other / "file"))
+
     def test_unmount(self):
         """Watched file systems can be unmounted"""
 
