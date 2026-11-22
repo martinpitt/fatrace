@@ -138,6 +138,29 @@ get_mount_id (const fsid_t *fsid)
     return AT_FDCWD;
 }
 
+/* readlink() an fd's path; "" on failure */
+static void
+get_fd_path (int fd, char *path, size_t path_size)
+{
+    char procpath[32];
+    snprintf (procpath, sizeof (procpath), "/proc/self/fd/%i", fd);
+    ssize_t len = readlink (procpath, path, path_size - 1);
+    path[len >= 0 ? len : 0] = '\0';
+}
+
+/* return an fd for the file handle of a fanotify info record */
+static int
+open_fid (const struct fanotify_event_info_fid *fid)
+{
+    int fd = open_by_handle_at (get_mount_id ((const fsid_t *) &fid->fsid),
+                                (struct file_handle *) fid->handle, O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_PATH);
+    /* ignore ESTALE for deleted fds between the notification and handling it */
+    if (fd < 0 && errno != ESTALE)
+        warn ("open_by_handle_at");
+
+    return fd;
+}
+
 /**
  * get_fid_event_fd:
  *
@@ -147,21 +170,13 @@ static int
 get_fid_event_fd (const struct fanotify_event_metadata *data)
 {
     const struct fanotify_event_info_fid *fid = (const struct fanotify_event_info_fid *) (data + 1);
-    int fd;
 
     if (fid->hdr.info_type != FAN_EVENT_INFO_TYPE_FID) {
         warnx ("Received unexpected event info type %i, cannot get affected file", fid->hdr.info_type);
         return -1;
     }
 
-    /* get affected file fd from fanotify_event_info_fid */
-    fd = open_by_handle_at (get_mount_id ((const fsid_t *) &fid->fsid),
-                            (struct file_handle *) fid->handle, O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_PATH);
-    /* ignore ESTALE for deleted fds between the notification and handling it */
-    if (fd < 0 && errno != ESTALE)
-        warn ("open_by_handle_at");
-
-    return fd;
+    return open_fid (fid);
 }
 
 /**
@@ -330,11 +345,7 @@ process_event (const struct fanotify_event_metadata *data,
             ev->ino = st.st_ino;
         }
 
-        snprintf (procpath, sizeof (procpath), "/proc/self/fd/%i", event_fd);
-        ssize_t len = readlink (procpath, ev->path, sizeof (ev->path) - 1);
-        if (len >= 0)
-            ev->path[len] = '\0';
-
+        get_fd_path (event_fd, ev->path, sizeof (ev->path));
         close (event_fd);
     }
 
