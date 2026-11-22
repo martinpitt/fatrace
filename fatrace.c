@@ -50,9 +50,6 @@
 
 #define BUFSIZE 256*1024
 
-/* Likely to be less than /proc/sys/fs/fanotify/max_user_marks */
-#define MAX_DIRS 4096
-
 #define DEBUG 0
 #if DEBUG
 #define debug(fmt, ...) fprintf (stderr, "DEBUG: " fmt "\n", ##__VA_ARGS__)
@@ -67,13 +64,14 @@ static long option_timeout = -1;
 static bool option_current_mount = false;
 static enum fatrace_timestamp option_timestamp = TIMESTAMP_NONE;
 static bool option_user = false;
-static pid_t ignored_pids[1024];
+/* both get allocated for the maximum possible number of arguments */
+static pid_t *ignored_pids;
 static unsigned int ignored_pids_len = 0;
 static char* option_comm = NULL;
 static bool option_json = false;
 static bool option_parents = false;
 static bool option_exe = false;
-static const char *option_dirs[MAX_DIRS];
+static const char **option_dirs;
 static unsigned int option_dirs_len = 0;
 
 /* --time alarm sets this to 0 */
@@ -678,6 +676,15 @@ parse_args (int argc, char** argv)
         {0,               0,                 0,  0 }
     };
 
+    /* each argument is at most one PID or directory, plus our own PID */
+    ignored_pids = calloc (argc + 1, sizeof (*ignored_pids));
+    option_dirs = calloc (argc, sizeof (*option_dirs));
+    if (!ignored_pids || !option_dirs)
+        err (EXIT_FAILURE, "Failed to allocate argument arrays");
+
+    /* always ignore events from ourselves (writing log file) */
+    ignored_pids[ignored_pids_len++] = getpid ();
+
     while (1) {
         c = getopt_long (argc, argv, "C:co:s:tup:f:jPed:h", long_options, NULL);
 
@@ -758,11 +765,7 @@ parse_args (int argc, char** argv)
                 pid = strtol (optarg, &endptr, 10);
                 if (*endptr != '\0' || pid <= 0)
                     errx (EXIT_FAILURE, "Error: Invalid PID");
-                if (ignored_pids_len
-                    < (sizeof (ignored_pids) / sizeof (ignored_pids[0])))
-                    ignored_pids[ignored_pids_len++] = pid;
-                else
-                    errx (EXIT_FAILURE, "Error: Too many ignored PIDs");
+                ignored_pids[ignored_pids_len++] = pid;
                 break;
 
             case 't':
@@ -783,9 +786,6 @@ parse_args (int argc, char** argv)
                 break;
 
             case 'd':
-                if (option_dirs_len >= MAX_DIRS)
-                    errx (EXIT_FAILURE, "Error: Too many --dir arguments"
-                          " (maximum is %d).", MAX_DIRS);
                 option_dirs[option_dirs_len++] = optarg;
                 break;
 
@@ -801,12 +801,8 @@ parse_args (int argc, char** argv)
                 errx (EXIT_FAILURE, "Internal error: unexpected option '%c'", c);
         }
     }
-    for (int i = optind; i < argc; i++) {
-        if (option_dirs_len >= MAX_DIRS)
-            errx (EXIT_FAILURE, "Error: Too many --dir and DIR arguments"
-                  " (maximum is %d).", MAX_DIRS);
+    for (int i = optind; i < argc; i++)
         option_dirs[option_dirs_len++] = argv[i];
-    }
     if (option_current_mount && option_dirs_len > 0)
         errx (EXIT_FAILURE,
               "Error: -c,--current-mount and -d,--dir are mutually exclusive.");
@@ -837,9 +833,6 @@ main (int argc, char** argv)
     struct timeval event_time;
     static struct fatrace_event event;
     void (*format_event) (FILE *, const struct fatrace_event *, enum fatrace_timestamp);
-
-    /* always ignore events from ourselves (writing log file) */
-    ignored_pids[ignored_pids_len++] = getpid ();
 
     parse_args (argc, argv);
     format_event = option_json ? format_fatrace_event_json : format_fatrace_event_text;
