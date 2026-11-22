@@ -750,7 +750,10 @@ main (int argc, char** argv)
     parse_args (argc, argv);
     format_event = option_json ? format_fatrace_event_json : format_fatrace_event_text;
 
-    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_DFID_NAME_TARGET, O_LARGEFILE);
+    /* Unprivileged users can initialize fanotify with file handles, but then the kernel only allows
+     * --dir watches, hides the pid of other processes, and open_by_handle_at() fails. Requesting the
+     * admin-only FAN_UNLIMITED_MARKS makes fanotify_init() fail without privileges. */
+    fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_DFID_NAME_TARGET | FAN_UNLIMITED_MARKS, O_LARGEFILE);
     if (fan_fd < 0) {
         if (errno == EINVAL)
             errx (EXIT_FAILURE,

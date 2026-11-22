@@ -14,6 +14,7 @@ from pathlib import Path
 
 TESTDIR = Path(__file__).parent.resolve()
 ROOTDIR = TESTDIR.parent.resolve()
+FATRACE = "fatrace" if os.getenv("FATRACE_INSTALLED_TEST") else str(ROOTDIR / "fatrace")
 
 exe = subprocess.check_call
 
@@ -58,8 +59,7 @@ class FatraceRunner:
         self.output_file = os.path.join(self.log_dir.name, "fatrace.log")
         self.log_content: str | None = None
 
-        fatrace_bin = "fatrace" if os.getenv("FATRACE_INSTALLED_TEST") else str(ROOTDIR / "fatrace")
-        argv = [fatrace_bin, "-o", str(self.output_file)]
+        argv = [FATRACE, "-o", str(self.output_file)]
         if json_output:
             argv.append("--json")
         self.process = subprocess.Popen(argv + args, **popen_kwargs)
@@ -374,6 +374,22 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             e["parents"][2] == {"pid": test_pid, "comm": "python3", "exe": str(test_exe)} and
             e["parents"][-1] == {"pid": 1, "comm": init_comm, "exe": str(init_exe)}
         ))
+
+    def test_unprivileged(self):
+        """Refuse to run without privileges"""
+
+        # nobody may not be able to read our source tree, see test_user
+        fatrace = self.tmp_path / "fatrace"
+        fatrace_bin = shutil.which(FATRACE)
+        assert fatrace_bin
+        shutil.copy(fatrace_bin, fatrace)
+
+        # watching directories works as non-root, but would not provide paths and pids
+        for args in ([], ["--current-mount"], [str(self.tmp_path)]):
+            p = subprocess.run(["runuser", "-u", "nobody", "--", str(fatrace), "-s", "1"] + args,
+                               capture_output=True, text=True, check=False)
+            self.assertNotEqual(p.returncode, 0, args)
+            self.assertIn("Cannot initialize fanotify", p.stderr)
 
     def test_user(self):
         nobody_user = pwd.getpwnam('nobody')
