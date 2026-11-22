@@ -263,6 +263,27 @@ class FatraceTests(unittest.TestCase):
         # the overflow is not reported as an event without process
         f.assert_not_json(lambda e: e["pid"] == 0)
 
+    def test_exited_process(self):
+        """Report events of processes which exited before fatrace handled them"""
+
+        test_file = self.tmp_path / "test.txt"
+        with tempfile.TemporaryFile("w+") as stderr:
+            f = FatraceRunner(["--current-mount", "--user", "--exe", "--parents", "-s", "2"], stderr=stderr)
+
+            # stop reading events, so that touch is gone when fatrace handles them
+            f.process.send_signal(signal.SIGSTOP)
+            touch = subprocess.Popen(["touch", str(test_file)])
+            self.assertEqual(touch.wait(), 0)
+            f.process.send_signal(signal.SIGCONT)
+            f.finish()
+
+            # the missing process information is expected, and not worth a warning
+            stderr.seek(0)
+            self.assertEqual(stderr.read(), "")
+
+        f.assert_json(lambda e: e["pid"] == touch.pid and "comm" not in e and "W" in e["types"] and
+                      e["path"] == str(test_file))
+
     def test_command(self):
         # command name that exceeds TASK_COMM_LEN (16 chars)
         long_cmd = self.tmp_path / "VeryLongTouchCommand"
