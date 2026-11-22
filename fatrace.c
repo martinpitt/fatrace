@@ -29,6 +29,7 @@
 #include <getopt.h>
 #include <limits.h>
 #include <mntent.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -911,8 +912,27 @@ main (int argc, char** argv)
         memset (&event_time, 0, sizeof (struct timeval));
     }
 
+    /* Block the stop signals except while waiting for events, so that they cannot arrive between checking
+     * `running` and waiting. Allow them while handling events, so that a second one can abort a stuck call. */
+    sigset_t stop_signals, orig_mask;
+    sigemptyset (&stop_signals);
+    sigaddset (&stop_signals, SIGINT);
+    sigaddset (&stop_signals, SIGALRM);
+    sigprocmask (SIG_BLOCK, NULL, &orig_mask);
+    struct pollfd pfd = { .fd = fan_fd, .events = POLLIN };
+
     /* read all events in a loop */
-    while (running) {
+    for (;;) {
+        sigprocmask (SIG_BLOCK, &stop_signals, NULL);
+        if (!running)
+            break;
+        if (ppoll (&pfd, 1, NULL, &orig_mask) < 0) {
+            if (errno == EINTR)
+                continue;
+            err (EXIT_FAILURE, "ppoll");
+        }
+        sigprocmask (SIG_SETMASK, &orig_mask, NULL);
+
         res = read (fan_fd, buffer, BUFSIZE);
         if (res == 0) {
             fprintf (stderr, "No more fanotify event (EOF)\n");
