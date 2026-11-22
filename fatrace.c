@@ -623,7 +623,7 @@ help (void)
     puts ("Usage: fatrace [options...] [--] [DIR...]\n"
 "\n"
 "Options:\n"
-"  -c, --current-mount           Only record events on partition/mount of\n"
+"  -c, --current-mount           Only record events on the file system of the\n"
 "                                current directory.\n"
 "  -o FILE, --output=FILE        Write events to a file instead of standard\n"
 "                                output.\n"

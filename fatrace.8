@@ -165,8 +165,9 @@ with ID 1.
 
 .TP
 .B \-c\fR, \fB\-\-current-mount
-Only record events on partition/mount of current directory. Without this
-option, all (real) partitions/mount points are being watched.
+Only record events on the file system of the current directory. This includes
+events through other mounts of that file system, such as bind mounts. Without
+this option, the file systems of all (real) mount points are being watched.
 
 .TP
 .B \-o \fIFILE\fR, \fB\-\-output=\fIFILE
