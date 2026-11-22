@@ -85,13 +85,12 @@ static int mark_mode = FAN_MARK_ADD | FAN_MARK_FILESYSTEM;
 /* fsid → mount point map, for resolving file handles. Mount points only get opened while handling an event,
  * so that fatrace does not keep the file systems busy. */
 
-#define MAX_MOUNTS 100
 static struct {
     fsid_t fsid;
     dev_t dev;                  /* of the watched path, to notice different file systems with the same fsid */
     char *mount_point;
     dev_t mount_dev;            /* to notice when mount_point got unmounted or mounted over */
-} fsids[MAX_MOUNTS];
+} *fsids;
 static size_t fsids_len;
 
 /* return the fsids[] index for an fsid, or -1 if unknown */
@@ -166,17 +165,17 @@ add_fsid (int fd, const char* path)
         return;
     }
 
-    if (fsids_len == MAX_MOUNTS) {
-        warnx ("Too many mounts, not resolving fd paths for %s", path);
-        return;
-    }
-
     mount_point = get_mount_point (fd, path);
     if (!mount_point || stat (mount_point, &mount_st) < 0) {
         warn ("Failed to find mount point of %s, not resolving its paths", path);
         free (mount_point);
         return;
     }
+
+    /* only called at startup, so growing one by one is fine */
+    fsids = reallocarray (fsids, fsids_len + 1, sizeof (*fsids));
+    if (!fsids)
+        err (EXIT_FAILURE, "Failed to allocate fsid map");
 
     memcpy (&fsids[fsids_len].fsid, &s.f_fsid, sizeof (s.f_fsid));
     fsids[fsids_len].dev = st.st_dev;

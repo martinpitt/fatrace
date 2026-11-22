@@ -509,19 +509,22 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             f.assert_not_json(on_path(f"{new_no1}/noJ"))
             f.assert_not_json(on_path(f"{new_no1}/subB/noK"))
 
-    def test_dir_other_filesystem(self):
-        """--dir on a different file system than the current directory"""
+    def test_dir_other_filesystems(self):
+        """--dir on many file systems other than the current directory's (issue #38)"""
 
-        other = self.tmp_path / "other"
-        other.mkdir()
-        exe(["mount", "-t", "tmpfs", "tmpfs", str(other)])
-        self.addCleanup(retry_unmount, str(other))
+        others = [self.tmp_path / f"other{i}" for i in range(150)]
+        for other in others:
+            other.mkdir()
+            exe(["mount", "-t", "tmpfs", "tmpfs", str(other)])
+            self.addCleanup(retry_unmount, str(other))
 
-        f = FatraceRunner(["-s", "2", "--dir", str(other)])
-        slow_exe(["touch", str(other / "file")])
+        f = FatraceRunner(["-s", "2"] + [str(other) for other in others])
+        files = [str(others[0] / "file"), str(others[-1] / "file")]
+        slow_exe(["touch"] + files)
         f.finish()
 
-        f.assert_json(lambda e: e["comm"] == "touch" and "W" in e["types"] and e["path"] == str(other / "file"))
+        for file in files:
+            f.assert_json(lambda e, file=file: e["comm"] == "touch" and "W" in e["types"] and e["path"] == file)
 
     def test_unmount(self):
         """Watched file systems can be unmounted"""
