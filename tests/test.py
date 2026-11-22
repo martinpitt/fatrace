@@ -391,6 +391,15 @@ with open("{python_pid_file}", "w") as f: f.write(f"{{os.getpid()}}\\n")
             self.assertNotEqual(p.returncode, 0, args)
             self.assertIn("Cannot initialize fanotify", p.stderr)
 
+    def test_no_watch(self):
+        """Fail if no watch could be added"""
+
+        # mounts of file systems without file handle support, such as procfs, cannot be watched
+        p = subprocess.run([FATRACE, "--current-mount", "-s", "1"], cwd="/proc",
+                           capture_output=True, text=True, check=False)
+        self.assertNotEqual(p.returncode, 0)
+        self.assertIn("Could not add any watch", p.stderr)
+
     def test_user(self):
         nobody_user = pwd.getpwnam('nobody')
         nobody_uid = nobody_user.pw_uid

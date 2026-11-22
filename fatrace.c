@@ -430,21 +430,18 @@ process_event (const struct fanotify_event_metadata *data,
     return true;
 }
 
-static void
-do_mark (int fan_fd, const char *dir, bool fatal)
+/* add a watch for a directory or its mount, depending on mark_mode; return whether it succeeded */
+static bool
+do_mark (int fan_fd, const char *dir)
 {
-    int res;
     uint64_t mask = FAN_ACCESS | FAN_MODIFY | FAN_OPEN | FAN_CLOSE | FAN_ONDIR | FAN_EVENT_ON_CHILD |
                     FAN_CREATE | FAN_DELETE | FAN_MOVE;
 
-    res = fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir);
-    if (res < 0)
-    {
-        if (fatal)
-            err (EXIT_FAILURE, "Failed to add watch for %s", dir);
-        else
-            warn ("Failed to add watch for %s", dir);
+    if (fanotify_mark (fan_fd, mark_mode, mask, AT_FDCWD, dir) < 0) {
+        warn ("Failed to add watch for %s", dir);
+        return false;
     }
+    return true;
 }
 
 /**
@@ -454,10 +451,14 @@ do_mark (int fan_fd, const char *dir, bool fatal)
  *
  * Set up fanotify watches on all mount points, or on the current directory
  * mount if --current-mount is given.
+ *
+ * Returns: true if at least one watch was added.
  */
-static void
+static bool
 setup_fanotify (int fan_fd)
 {
+    bool watched = false;
+
     if (option_dirs_len > 0) {
         mark_mode = FAN_MARK_ADD;
         char resolved[PATH_MAX];
@@ -466,7 +467,7 @@ setup_fanotify (int fan_fd)
             if (realpath(option_dirs[i], resolved) &&
                 stat(resolved, &st) == 0) {
                 if (S_ISDIR(st.st_mode))
-                    do_mark (fan_fd, resolved, false);
+                    watched |= do_mark (fan_fd, resolved);
                 else
                     errx(EXIT_FAILURE,
                          "Not a directory: %s", option_dirs[i]);
@@ -475,20 +476,18 @@ setup_fanotify (int fan_fd)
                 err(EXIT_FAILURE,
                     "Cannot resolve directory: %s", option_dirs[i]);
         }
-        return;
+        return watched;
     }
 
     FILE* mounts;
     struct mntent* mount;
 
-    if (option_current_mount) {
-        do_mark (fan_fd, ".", true);
-        return;
-    }
+    if (option_current_mount)
+        return do_mark (fan_fd, ".");
 
     /* iterate over all mounts; explicitly start with the root dir, to get
      * the shortest possible paths on fsid resolution on e. g. OSTree */
-    do_mark (fan_fd, "/", false);
+    watched = do_mark (fan_fd, "/");
     add_fsid ("/");
 
     mounts = setmntent ("/proc/self/mounts", "r");
@@ -513,11 +512,12 @@ setup_fanotify (int fan_fd)
             continue;
 
         debug ("add watch for %s mount %s", mount->mnt_type, mount->mnt_dir);
-        do_mark (fan_fd, mount->mnt_dir, false);
+        watched |= do_mark (fan_fd, mount->mnt_dir);
         add_fsid (mount->mnt_dir);
     }
 
     endmntent (mounts);
+    return watched;
 }
 
 /**
@@ -761,7 +761,8 @@ main (int argc, char** argv)
         err (EXIT_FAILURE, "Cannot initialize fanotify");
     }
 
-    setup_fanotify (fan_fd);
+    if (!setup_fanotify (fan_fd))
+        errx (EXIT_FAILURE, "Could not add any watch");
 
     /* allocate memory for fanotify */
     buffer = NULL;
