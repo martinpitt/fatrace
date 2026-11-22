@@ -691,13 +691,9 @@ main (int argc, char** argv)
 
     fan_fd = fanotify_init (FAN_CLASS_NOTIF | FAN_REPORT_FID, O_LARGEFILE);
     if (fan_fd < 0) {
-        int e = errno;
-        perror ("Cannot initialize fanotify");
-        if (e == EPERM)
-            fputs ("You need to run this program as root.\n", stderr);
-        else if (e == EINVAL)
-            fputs ("fatrace requires Linux 5.9 or newer.\n", stderr);
-        exit (EXIT_FAILURE);
+        if (errno == EINVAL)
+            errx (EXIT_FAILURE, "Cannot initialize fanotify: fatrace requires Linux 5.9 or newer");
+        err (EXIT_FAILURE, "Cannot initialize fanotify");
     }
 
     setup_fanotify (fan_fd);
